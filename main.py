@@ -140,6 +140,14 @@ def build_review_prompt(code_text: str) -> str:
     Severity labeling (CRITICAL vs WARNING for the same issue) is still
     inconsistent run-to-run at this model size — that's a model capability
     limit prompting doesn't fully fix, not a parsing bug.
+
+    Corrections: each finding must include a concrete fix on the same line
+    as its severity tag, via a "Correction: ..." clause. This has to live
+    on the same line as the tag because parse_severity_counts() splits on
+    newlines — a correction on its own line would be dropped, and worse,
+    a bare continuation line wouldn't start with a known prefix so it
+    would silently vanish from review_text's effective content instead of
+    erroring.
     """
     return (
         "You are an expert automated code reviewer. Analyze the code snippet "
@@ -159,12 +167,19 @@ def build_review_prompt(code_text: str) -> str:
         "- WARNING = design or maintainability concerns that are not "
         "security bugs (missing error handling, poor structure).\n"
         "- NITPICK = pure style (naming, formatting, comments).\n"
+        "- For every issue found, you must identify the fault AND provide "
+        "a specific, actionable code correction on the same line, "
+        "introduced by \"Correction:\". Never put the correction on its "
+        "own line or a new line.\n"
         "- Do not include conversational intro/outro, repeat the code, or "
         "use markdown.\n\n"
         "Example Output (format only, unrelated to the code below):\n"
-        "CRITICAL: <bug or security issue>\n"
-        "WARNING: <design or maintainability concern>\n"
-        "NITPICK: <style nit>\n\n"
+        "CRITICAL: Unsanitized input allows SQL Injection. Correction: Use "
+        "parameterized queries (e.g., cursor.execute(\"SELECT...\", (user_id,)))\n"
+        "WARNING: Hardcoded API secret exposed. Correction: Load this from "
+        "an environment variable using os.getenv('API_KEY').\n"
+        "NITPICK: Variable name 'x' is non-descriptive. Correction: Rename "
+        "'x' to a name that reflects its purpose, e.g. 'user_count'.\n\n"
         "Analyze this code:\n"
         f"{code_text}"
     )
