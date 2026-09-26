@@ -4,7 +4,7 @@ import json
 import requests
 
 SECRET = b"your_secret_here"
-URL = "http://127.0.0.1:8010/api/webhook/github"
+URL = "http://127.0.0.1:8000/api/webhook/github"
 
 # Mock GitHub Webhook Payload.
 # Shape mirrors a real "pull_request" event: repo info lives in the

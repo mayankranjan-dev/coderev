@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -45,8 +45,10 @@ logger = logging.getLogger("coderev_bot")
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
-OLLAMA_TIMEOUT_SECONDS = 10.0
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
+# Default 10s per the original spec. CPU-only machines can need longer for
+# generation even with the model loaded, so this is overridable via env.
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "10"))
 
 # Create tables on startup. For a production system with migrations this
 # would be replaced by Alembic, but that's out of scope here.
@@ -82,6 +84,10 @@ class HealthOut(BaseModel):
     ollama_reachable: bool
 
 
+class ManualReviewRequest(BaseModel):
+    code_snippet: str
+
+
 # ---------------------------------------------------------------------------
 # Webhook signature verification (hand-written, no libraries)
 # ---------------------------------------------------------------------------
@@ -113,15 +119,54 @@ def verify_github_signature(raw_body: bytes, signature_header: Optional[str]) ->
 # Ollama integration
 # ---------------------------------------------------------------------------
 
-def build_review_prompt(diff_text: str) -> str:
+def build_review_prompt(code_text: str) -> str:
+    """
+    Prompt tuned against qwen2.5-coder:1.5b (see also OLLAMA_MODEL). Two
+    behaviors specific to this small model drove the shape of this prompt,
+    found by direct experimentation against the /api/generate endpoint:
+
+    1. A concrete few-shot example (e.g. a finding about a variable named
+       'r') makes the model anchor on that example's literal wording and
+       repeat a lookalike finding almost verbatim, even when the actual
+       code doesn't have that specific problem. A placeholder example
+       ("<bug or security issue>") avoids this while still teaching the
+       output format.
+    2. Without an explicit checklist of issue categories, the model reports
+       only the first issue it notices and stops. The checklist plus
+       "report EVERY issue on its own line" is what gets multiple findings
+       out, each on a separate line (parse_severity_counts() splits on
+       newlines, so findings glued onto one line would otherwise be missed).
+
+    Severity labeling (CRITICAL vs WARNING for the same issue) is still
+    inconsistent run-to-run at this model size — that's a model capability
+    limit prompting doesn't fully fix, not a parsing bug.
+    """
     return (
-        "You are a senior code reviewer. Review the following unified diff. "
-        "List every finding as a single line prefixed with one of: "
-        "CRITICAL:, WARNING:, or NITPICK:. Use CRITICAL for bugs, security "
-        "issues, or correctness problems; WARNING for design or maintainability "
-        "concerns; NITPICK for style/formatting. One finding per line, no other "
-        "commentary or preamble.\n\n"
-        f"Diff:\n{diff_text}"
+        "You are an expert automated code reviewer. Analyze the code snippet "
+        "for security vulnerabilities, bugs, and code smells. The input may "
+        "be a unified diff or a standalone snippet.\n\n"
+        "Check specifically for: injection vulnerabilities (SQL/command/etc.), "
+        "hardcoded secrets or credentials, missing error handling, "
+        "correctness bugs, and naming or style issues. Report EVERY issue "
+        "you find, each on its own line, not just the first one.\n\n"
+        "Strict Output Rules:\n"
+        "- Each finding is exactly one line, separated by a newline "
+        "character. Never merge multiple findings onto one line.\n"
+        "- Every line MUST start with exactly one prefix: CRITICAL:, "
+        "WARNING:, or NITPICK:.\n"
+        "- CRITICAL = security vulnerabilities (injection, hardcoded "
+        "secrets, auth bypass) or correctness bugs.\n"
+        "- WARNING = design or maintainability concerns that are not "
+        "security bugs (missing error handling, poor structure).\n"
+        "- NITPICK = pure style (naming, formatting, comments).\n"
+        "- Do not include conversational intro/outro, repeat the code, or "
+        "use markdown.\n\n"
+        "Example Output (format only, unrelated to the code below):\n"
+        "CRITICAL: <bug or security issue>\n"
+        "WARNING: <design or maintainability concern>\n"
+        "NITPICK: <style nit>\n\n"
+        "Analyze this code:\n"
+        f"{code_text}"
     )
 
 
@@ -139,33 +184,63 @@ def parse_severity_counts(review_text: str) -> dict:
     return counts
 
 
-async def request_ollama_review(diff_text: str) -> Optional[str]:
-    """
-    Send the diff to Ollama for review.
+def _offline_result() -> dict:
+    return {
+        "review_text": None,
+        "critical_count": 0,
+        "warning_count": 0,
+        "nitpick_count": 0,
+        "status": "llm_offline_pending",
+    }
 
-    Returns the model's response text on success, or None if Ollama is
-    unreachable/timed out. This path (Ollama offline) is an expected,
-    routine condition in production — not an error — so it's logged at
-    INFO level and handled gracefully rather than raising.
+
+async def review_code_with_ollama(code_text: str) -> dict:
+    """
+    Single entry point for LLM review, shared by the webhook and manual paths.
+
+    Returns:
+        {"review_text": str | None, "critical_count": int, "warning_count": int,
+         "nitpick_count": int, "status": "reviewed" | "llm_offline_pending"}
+
+    Never raises. Ollama being offline is an expected, routine condition in
+    production — not an error — so it's logged at INFO and reported through
+    status="llm_offline_pending" with zero counts. review_text stays None in
+    that case so offline rows keep storing NULL, as they did before.
+
+    Async (not a plain def) because it performs network I/O from async
+    handlers; a blocking client here would stall the event loop.
     """
     payload = {
         "model": OLLAMA_MODEL,
-        "prompt": build_review_prompt(diff_text),
+        "prompt": build_review_prompt(code_text),
         "stream": False,
+        # Low temperature: at the default (~0.8) this small model's finding
+        # count and severity labels vary noticeably between identical
+        # requests. Determinism matters more here than creative phrasing.
+        "options": {"temperature": 0.2},
     }
 
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
             response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
             response.raise_for_status()
-            data = response.json()
-            return data.get("response", "")
-    except (httpx.ConnectError, httpx.TimeoutException):
-        logger.info("Ollama is unreachable at %s; queuing review as llm_offline_pending.", OLLAMA_BASE_URL)
-        return None
-    except httpx.HTTPStatusError as exc:
-        logger.warning("Ollama returned an error status: %s", exc)
-        return None
+            review_text = response.json().get("response", "")
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        if isinstance(exc, httpx.TimeoutException):
+            logger.info(
+                "Ollama did not respond within %ss; marking review llm_offline_pending.",
+                OLLAMA_TIMEOUT_SECONDS,
+            )
+        else:
+            logger.info("Ollama is unreachable at %s; marking review llm_offline_pending.", OLLAMA_BASE_URL)
+        return _offline_result()
+    except (httpx.HTTPError, ValueError) as exc:
+        # Error status, connection dropped mid-response, or a non-JSON body.
+        # Still degrade gracefully: the caller's contract is "never raise".
+        logger.warning("Ollama review failed: %s", exc)
+        return _offline_result()
+
+    return {"review_text": review_text, **parse_severity_counts(review_text), "status": "reviewed"}
 
 
 async def check_ollama_reachable() -> bool:
@@ -232,19 +307,13 @@ async def process_pull_request_event(payload: dict) -> None:
             db.commit()
             return
 
-        review_text = await request_ollama_review(diff_text)
+        result = await review_code_with_ollama(diff_text)
 
-        if review_text is None:
-            review.status = "llm_offline_pending"
-            db.commit()
-            return
-
-        counts = parse_severity_counts(review_text)
-        review.review_text = review_text
-        review.critical_count = counts["critical_count"]
-        review.warning_count = counts["warning_count"]
-        review.nitpick_count = counts["nitpick_count"]
-        review.status = "reviewed"
+        review.review_text = result["review_text"]
+        review.critical_count = result["critical_count"]
+        review.warning_count = result["warning_count"]
+        review.nitpick_count = result["nitpick_count"]
+        review.status = result["status"]
         db.commit()
     finally:
         db.close()
@@ -288,6 +357,31 @@ async def github_webhook(
 def get_reviews(db: Session = Depends(get_db)):
     reviews = db.query(PRReview).order_by(PRReview.created_at.desc()).all()
     return reviews
+
+
+@app.post("/api/reviews/manual", response_model=ReviewOut)
+async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_db)):
+    if not payload.code_snippet.strip():
+        raise HTTPException(status_code=422, detail="code_snippet cannot be empty")
+
+    result = await review_code_with_ollama(payload.code_snippet)
+
+    new_review = PRReview(
+        repo_name="Manual Submission",
+        pr_number=0,
+        pr_title="N/A",
+        pr_url="N/A",
+        diff_text=payload.code_snippet,
+        review_text=result["review_text"],
+        critical_count=result["critical_count"],
+        warning_count=result["warning_count"],
+        nitpick_count=result["nitpick_count"],
+        status=result["status"],
+    )
+    db.add(new_review)
+    db.commit()
+    db.refresh(new_review)
+    return new_review
 
 
 @app.get("/api/health", response_model=HealthOut)
