@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/*
+ * Font stack: Inter when available, otherwise system-ui. No webfont is
+ * loaded — no decorative display faces.
+ */
+@theme {
+  --font-sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}

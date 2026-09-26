@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+
+# Database
+audit.db
+*.db
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor
+.vscode/
