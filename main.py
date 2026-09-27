@@ -50,6 +50,28 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
 # generation even with the model loaded, so this is overridable via env.
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "10"))
 
+# Judge0 Community Edition runs submitted code in an isolated worker with its
+# own CPU/memory/process limits. Execution is deliberately delegated to it
+# rather than run in-process: nothing the user pastes is ever exec()'d,
+# imported, or written to disk on this host.
+#
+# `wait=true` makes this a synchronous call — Judge0 holds the connection until
+# the run finishes and returns the result inline, so there's no token to poll.
+# `base64_encoded=false` means source_code goes over as plain UTF-8 text.
+JUDGE0_API_URL = os.getenv(
+    "JUDGE0_API_URL", "https://ce.judge0.com/submissions?base64_encoded=false&wait=true"
+)
+# 71 is Python 3 in Judge0 CE's language table (GET /languages).
+JUDGE0_PYTHON_LANGUAGE_ID = int(os.getenv("JUDGE0_PYTHON_LANGUAGE_ID", "71"))
+# Generous relative to the ~1s typical turnaround: the free instance queues
+# submissions under load, and `wait=true` keeps the socket open for the wait.
+JUDGE0_TIMEOUT_SECONDS = float(os.getenv("JUDGE0_TIMEOUT_SECONDS", "30"))
+# Judge0's "Accepted" status. Any other status means the program didn't finish
+# cleanly, which matters when it produced no output to explain why.
+JUDGE0_STATUS_ACCEPTED = 3
+# Guards against shipping a multi-megabyte paste to a shared free service.
+MAX_EXECUTE_CODE_CHARS = int(os.getenv("MAX_EXECUTE_CODE_CHARS", "50000"))
+
 # Create tables on startup. For a production system with migrations this
 # would be replaced by Alembic, but that's out of scope here.
 Base.metadata.create_all(bind=engine)
@@ -88,6 +110,15 @@ class ManualReviewRequest(BaseModel):
     code_snippet: str
 
 
+class ExecuteRequest(BaseModel):
+    code: str
+
+
+class ExecuteOut(BaseModel):
+    stdout: str
+    stderr: str
+
+
 # ---------------------------------------------------------------------------
 # Webhook signature verification (hand-written, no libraries)
 # ---------------------------------------------------------------------------
@@ -118,6 +149,20 @@ def verify_github_signature(raw_body: bytes, signature_header: Optional[str]) ->
 # ---------------------------------------------------------------------------
 # Ollama integration
 # ---------------------------------------------------------------------------
+
+class SandboxError(RuntimeError):
+    """
+    Raised when the sandbox itself fails (unreachable, timed out, rate limited,
+    malformed response) — never for user code that merely exits non-zero.
+
+    Provider-neutral on purpose: the execution backend has already been swapped
+    once (Piston -> Judge0), and the endpoint's error contract shouldn't churn
+    with it.
+
+    The message is user-facing: it is surfaced in the terminal's stderr pane, so
+    it must stay free of internal URLs, stack detail, or host information.
+    """
+
 
 def build_review_prompt(code_text: str) -> str:
     """
@@ -256,6 +301,104 @@ async def review_code_with_ollama(code_text: str) -> dict:
         return _offline_result()
 
     return {"review_text": review_text, **parse_severity_counts(review_text), "status": "reviewed"}
+
+
+def _combine_judge0_stderr(body: dict) -> str:
+    """
+    Fold Judge0's several failure channels into one stderr string.
+
+    Judge0 splits diagnostics across three fields, any of which may be JSON
+    null, and which one is populated depends on how the program died:
+      - compile_output: rejected before running (for Python: SyntaxError)
+      - stderr:         ran, then raised (traceback)
+      - message:        harness-level note, e.g. the reason for a kill
+
+    compile_output is placed first because compilation precedes execution, so
+    that ordering matches the order the failures actually happened in.
+
+    A non-Accepted status with nothing captured (time limit exceeded is the
+    common case) would otherwise render as an empty terminal, so the status
+    description is used as the last-resort explanation.
+    """
+    status = body.get("status") or {}
+    status_id = status.get("id")
+    status_description = (status.get("description") or "").strip()
+
+    segments = []
+    for field in ("compile_output", "stderr", "message"):
+        value = body.get(field)
+        if isinstance(value, str) and value.strip():
+            segments.append(value.strip("\n"))
+
+    if segments:
+        return "\n".join(segments)
+
+    # Nothing captured. Only explain ourselves if the run wasn't clean.
+    if status_id != JUDGE0_STATUS_ACCEPTED and status_description:
+        return status_description
+
+    return ""
+
+
+async def execute_code_with_judge0(code: str) -> dict:
+    """
+    Run `code` on the Judge0 sandbox and return {"stdout": str, "stderr": str}.
+
+    Raises SandboxError on transport/protocol failure so the endpoint can map it
+    to a 500. A *program* that fails (syntax error, exception, non-zero exit) is
+    not a failure of this function — Judge0 reports that in stderr /
+    compile_output, which is passed through so the user sees their own traceback.
+    """
+    payload = {
+        "source_code": code,
+        "language_id": JUDGE0_PYTHON_LANGUAGE_ID,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=JUDGE0_TIMEOUT_SECONDS) as client:
+            response = await client.post(JUDGE0_API_URL, json=payload)
+            response.raise_for_status()
+            body = response.json()
+    except httpx.TimeoutException as exc:
+        logger.warning("Judge0 execution timed out after %ss: %s", JUDGE0_TIMEOUT_SECONDS, exc)
+        raise SandboxError(
+            f"Execution timed out after {JUDGE0_TIMEOUT_SECONDS:g}s. "
+            "The sandbox did not respond in time."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        logger.warning("Judge0 returned HTTP %s: %s", status, exc.response.text[:500])
+        # 429 is the most likely failure on the shared free instance; 401/403
+        # would mean the public CE endpoint has started requiring a key.
+        if status == 429:
+            detail = "Sandbox rate limit reached. Wait a moment and try again."
+        elif status in (401, 403):
+            detail = "Sandbox rejected the request as unauthorized."
+        else:
+            detail = f"Sandbox returned an error (HTTP {status})."
+        raise SandboxError(detail) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("Judge0 request failed: %s", exc)
+        raise SandboxError("Could not reach the execution sandbox.") from exc
+    except ValueError as exc:
+        logger.warning("Judge0 returned a non-JSON body: %s", exc)
+        raise SandboxError("Sandbox returned a malformed response.") from exc
+
+    # A non-dict body means the contract changed — treat as an error rather than
+    # silently reporting empty output as a successful run.
+    if not isinstance(body, dict):
+        logger.warning("Judge0 response was not a JSON object: %s", str(body)[:500])
+        raise SandboxError("Sandbox returned an unexpected response shape.")
+
+    # With wait=true a finished submission always carries a status. Still queued
+    # (1) or processing (2) means wait=true didn't hold, and returning the empty
+    # result as-is would look like a program that printed nothing.
+    status_id = (body.get("status") or {}).get("id")
+    if status_id in (1, 2):
+        logger.warning("Judge0 returned an unfinished submission: status id %s", status_id)
+        raise SandboxError("Sandbox did not finish the run in time.")
+
+    return {"stdout": body.get("stdout") or "", "stderr": _combine_judge0_stderr(body)}
 
 
 async def check_ollama_reachable() -> bool:
@@ -397,6 +540,35 @@ async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_
     db.commit()
     db.refresh(new_review)
     return new_review
+
+
+@app.post("/api/execute", response_model=ExecuteOut)
+async def execute_code(payload: ExecuteRequest):
+    """
+    Run a Python snippet in the Judge0 sandbox and return its captured output.
+
+    The response shape is {"stdout", "stderr"} on both the success and failure
+    paths — on failure the status is 500 and the reason is placed in stderr, so
+    the frontend terminal can render every outcome through one code path.
+    """
+    if not payload.code.strip():
+        return ExecuteOut(stdout="", stderr="No code to execute.")
+
+    if len(payload.code) > MAX_EXECUTE_CODE_CHARS:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "stdout": "",
+                "stderr": f"Code exceeds the {MAX_EXECUTE_CODE_CHARS} character execution limit.",
+            },
+        )
+
+    try:
+        result = await execute_code_with_judge0(payload.code)
+    except SandboxError as exc:
+        return JSONResponse(status_code=500, content={"stdout": "", "stderr": str(exc)})
+
+    return ExecuteOut(**result)
 
 
 @app.get("/api/health", response_model=HealthOut)

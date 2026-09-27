@@ -30,6 +30,14 @@ const STATUS_LABELS = {
 // Must match repo_name set by POST /api/reviews/manual in main.py.
 const MANUAL_REPO_NAME = "Manual Submission";
 
+// Matte palette for the execution sandbox. Flat fills only — no gradients,
+// no translucency, no shadows, no border radius.
+const SUBMIT_BUTTON_BG = "#4f46e5"; // primary action (review)
+const RUN_BUTTON_BG = "#334155"; // secondary action (execute)
+const TERMINAL_BG = "#f1f5f9";
+const TERMINAL_TEXT = "#0f172a";
+const TERMINAL_BORDER = "#e2e8f0";
+
 function isManualReview(review) {
   return review.repo_name === MANUAL_REPO_NAME;
 }
@@ -179,36 +187,112 @@ function Pane({ title, action, children }) {
   );
 }
 
-function ManualEditor({ code, onChange, onSubmit, submitting, error }) {
-  const canSubmit = !submitting && code.trim().length > 0;
+/**
+ * Read-only output pane for POST /api/execute.
+ *
+ * Flat by construction: one hairline top border, one solid fill, no radius, no
+ * shadow, no gradient. Colors are written as literal hex rather than Tailwind
+ * shade names so the matte palette can't drift if the theme is retuned.
+ *
+ * `output` carries status text and stdout; `stderr` is rendered separately in
+ * red underneath it, because a run can legitimately produce both (a script that
+ * prints, then raises).
+ */
+function Terminal({ output, stderr }) {
+  const hasContent = Boolean(output) || Boolean(stderr);
 
   return (
-    <form onSubmit={onSubmit} className="flex h-full flex-col gap-3 p-4">
-      <label htmlFor="manual-code" className="sr-only">
-        Code to review
-      </label>
-      <textarea
-        id="manual-code"
-        value={code}
-        onChange={(event) => onChange(event.target.value)}
-        spellCheck={false}
-        placeholder="Paste code to review"
-        className="min-h-0 flex-1 resize-none rounded border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-900 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
-      />
-      {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex justify-end">
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-indigo-600"
-        >
-          Submit for Review
-        </button>
+    <section
+      aria-label="Terminal"
+      className="flex min-h-0 shrink-0 basis-[30%] flex-col border-t"
+      style={{ borderTopColor: TERMINAL_BORDER, backgroundColor: TERMINAL_BG }}
+    >
+      <header className="shrink-0 px-4 pt-2 pb-1">
+        <span className="font-mono text-xs uppercase tracking-wide text-slate-500">
+          Terminal
+        </span>
+      </header>
+
+      <div
+        // aria-live so screen readers announce results; the pane is never
+        // focusable or editable, matching the read-only requirement.
+        aria-live="polite"
+        className="min-h-0 flex-1 overflow-auto px-4 pb-3"
+      >
+        {hasContent ? (
+          <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-5">
+            {output ? <span style={{ color: TERMINAL_TEXT }}>{output}</span> : null}
+            {output && stderr ? "\n" : null}
+            {stderr ? <span className="text-red-600">{stderr}</span> : null}
+          </pre>
+        ) : (
+          <p className="font-mono text-sm leading-5 text-slate-500">
+            Run the code to see output here.
+          </p>
+        )}
       </div>
+    </section>
+  );
+}
+
+function ManualEditor({
+  code,
+  onChange,
+  onSubmit,
+  onRun,
+  submitting,
+  error,
+  terminalOutput,
+  terminalError,
+  isExecuting,
+}) {
+  const hasCode = code.trim().length > 0;
+  const busy = submitting || isExecuting;
+  const canSubmit = !busy && hasCode;
+  const canRun = !busy && hasCode;
+
+  return (
+    <form onSubmit={onSubmit} className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 basis-[70%] flex-col gap-3 p-4">
+        <label htmlFor="manual-code" className="sr-only">
+          Code to review
+        </label>
+        <textarea
+          id="manual-code"
+          value={code}
+          onChange={(event) => onChange(event.target.value)}
+          spellCheck={false}
+          placeholder="Paste code to review"
+          className="min-h-0 flex-1 resize-none border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-900 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+        />
+        {error ? (
+          <p role="alert" className="text-sm text-red-700">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex shrink-0 justify-end gap-2">
+          {/* type="button": this must not submit the review form. */}
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={!canRun}
+            className="px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100"
+            style={{ backgroundColor: RUN_BUTTON_BG }}
+          >
+            {isExecuting ? "Running..." : "Run Code"}
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100"
+            style={{ backgroundColor: SUBMIT_BUTTON_BG }}
+          >
+            Submit for Review
+          </button>
+        </div>
+      </div>
+
+      <Terminal output={terminalOutput} stderr={terminalError} />
     </form>
   );
 }
@@ -223,6 +307,11 @@ export default function App() {
   const [manualCode, setManualCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Terminal state for the execution sandbox. stdout/status text and stderr are
+  // held apart so stderr can be rendered red while stdout stays standard.
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalError, setTerminalError] = useState("");
+  const [isExecuting, setIsExecuting] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -272,6 +361,9 @@ export default function App() {
     setMode("manual");
     setSelectedId(null);
     setSubmitError(null);
+    // Don't carry a previous run's output into a fresh editor session.
+    setTerminalOutput("");
+    setTerminalError("");
   }
 
   function backToBrowse() {
@@ -283,6 +375,52 @@ export default function App() {
   function selectReview(id) {
     setMode("browse");
     setSelectedId(id);
+  }
+
+  /**
+   * POST the editor contents to /api/execute and render the result.
+   *
+   * The backend returns {stdout, stderr} on both success and failure, so the
+   * non-ok branch reads the same shape instead of throwing. A program that
+   * exits non-zero is a normal result here, not an error state.
+   */
+  async function runCode() {
+    if (isExecuting || submitting || !manualCode.trim()) return;
+
+    setIsExecuting(true);
+    setTerminalOutput("Executing...");
+    setTerminalError("");
+
+    try {
+      const response = await fetch("/api/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: manualCode }),
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!body) {
+        setTerminalOutput("");
+        setTerminalError(`Execution failed with status ${response.status}.`);
+        return;
+      }
+
+      const stdout = typeof body.stdout === "string" ? body.stdout : "";
+      const stderr = typeof body.stderr === "string" ? body.stderr : "";
+
+      // An empty successful run still needs feedback, otherwise the pane looks
+      // like nothing happened.
+      setTerminalOutput(
+        stdout || (stderr ? "" : "Execution finished with no output.")
+      );
+      setTerminalError(stderr);
+    } catch (err) {
+      setTerminalOutput("");
+      setTerminalError(err.message || "Unable to reach the execution sandbox.");
+    } finally {
+      setIsExecuting(false);
+    }
   }
 
   async function submitManualReview(event) {
@@ -426,8 +564,12 @@ export default function App() {
                   code={manualCode}
                   onChange={setManualCode}
                   onSubmit={submitManualReview}
+                  onRun={runCode}
                   submitting={submitting}
                   error={submitError}
+                  terminalOutput={terminalOutput}
+                  terminalError={terminalError}
+                  isExecuting={isExecuting}
                 />
               ) : (
                 <DiffView diffText={selected?.diff_text} />
