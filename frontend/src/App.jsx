@@ -1,13 +1,18 @@
 /**
  * CodeRev Bot — two-pane review workspace.
  *
- * Fetches GET /api/reviews once on mount. The dropdown selection filters the
- * already-fetched array. Manual mode POSTs a snippet to /api/reviews/manual,
- * prepends the returned row to that same array, and renders it through the
- * same DiffView/ReviewView path as webhook PRs.
+ * Fetches GET /api/reviews once on mount but never auto-selects a row: the
+ * app always opens on the zero-state landing screen, and a PR/manual review
+ * only appears once the user explicitly picks one. The dropdown selection
+ * filters the already-fetched array. Manual mode POSTs a snippet to
+ * /api/reviews/manual, prepends the returned row to that same array, and
+ * renders it through the same DiffView/ReviewView path as webhook PRs.
  *
- * Accent choice: indigo-600 is used for primary actions only (the retry
- * button and focus rings). Everything else is slate.
+ * Accent choice: indigo-600 is used for primary actions only (review submit,
+ * retry, focus rings). Everything structural is slate. The execution
+ * sandbox's Terminal is the one deliberate exception — it's styled as a real
+ * dark terminal (slate-900/950) to read as an authentic execution surface
+ * against the otherwise light, matte workspace.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -29,14 +34,6 @@ const STATUS_LABELS = {
 
 // Must match repo_name set by POST /api/reviews/manual in main.py.
 const MANUAL_REPO_NAME = "Manual Submission";
-
-// Matte palette for the execution sandbox. Flat fills only — no gradients,
-// no translucency, no shadows, no border radius.
-const SUBMIT_BUTTON_BG = "#4f46e5"; // primary action (review)
-const RUN_BUTTON_BG = "#334155"; // secondary action (execute)
-const TERMINAL_BG = "#f1f5f9";
-const TERMINAL_TEXT = "#0f172a";
-const TERMINAL_BORDER = "#e2e8f0";
 
 function isManualReview(review) {
   return review.repo_name === MANUAL_REPO_NAME;
@@ -101,6 +98,64 @@ function Spinner() {
   );
 }
 
+/*
+ * Small line-icon set for empty/landing states. Deliberately plain: single
+ * stroke, no fill, no gradient — decoration that fits the matte theme rather
+ * than fights it.
+ */
+
+function CodeIcon(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M8 4 3 12l5 8" />
+      <path d="M16 4l5 8-5 8" />
+    </svg>
+  );
+}
+
+function DocumentIcon(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M8 3.5h6.5L19 8v11.5a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+      <path d="M14.5 3.5V8H19" />
+      <path d="M9.5 12.5h5M9.5 15.5h5M9.5 18h3" />
+    </svg>
+  );
+}
+
+/**
+ * Centered placeholder for a pane with no content yet. Used for the manual
+ * editor's un-submitted review pane and for a PR with no stored diff — never
+ * a bare line of text.
+ */
+function EmptyState({ icon, title, subtitle }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+      <span className="text-slate-300">{icon}</span>
+      <p className="text-sm font-medium text-slate-600">{title}</p>
+      {subtitle ? <p className="max-w-xs text-xs leading-5 text-slate-400">{subtitle}</p> : null}
+    </div>
+  );
+}
+
 /** Per-line classes for a unified diff. Muted, flat, readable. */
 function diffLineClass(line) {
   if (line.startsWith("+++") || line.startsWith("---")) return "text-slate-500";
@@ -116,9 +171,11 @@ function DiffView({ diffText }) {
 
   if (!diffText) {
     return (
-      <p className="p-4 text-sm text-slate-500">
-        No diff was stored for this pull request.
-      </p>
+      <EmptyState
+        icon={<DocumentIcon className="h-8 w-8" />}
+        title="No diff stored"
+        subtitle="This pull request has no diff on record."
+      />
     );
   }
 
@@ -175,11 +232,16 @@ function ReviewView({ review }) {
   );
 }
 
+/**
+ * Panel shell. Header reads like an IDE tab — small, uppercase, muted label
+ * over a hairline rule — rather than a document title, to match the rest of
+ * the workspace chrome.
+ */
 function Pane({ title, action, children }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-col border border-slate-200 bg-white">
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 px-4 py-2.5">
-        <h2 className="text-sm font-medium text-slate-900">{title}</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</h2>
         {action}
       </header>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
@@ -190,13 +252,15 @@ function Pane({ title, action, children }) {
 /**
  * Read-only output pane for POST /api/execute.
  *
- * Flat by construction: one hairline top border, one solid fill, no radius, no
- * shadow, no gradient. Colors are written as literal hex rather than Tailwind
- * shade names so the matte palette can't drift if the theme is retuned.
+ * Styled as an authentic dark terminal — bg-slate-900 body, bg-slate-950
+ * header bar — the one deliberate break from the light workspace chrome,
+ * because a sandbox output stream reads as more credible when it looks like
+ * one. Flat fills only, still no gradients/shadows/radius.
  *
  * `output` carries status text and stdout; `stderr` is rendered separately in
- * red underneath it, because a run can legitimately produce both (a script that
- * prints, then raises).
+ * a dim red underneath it, because a run can legitimately produce both (a
+ * script that prints, then raises). red-400 rather than red-600 is used for
+ * legibility against the dark body — red-600 loses contrast on slate-900.
  */
 function Terminal({ output, stderr }) {
   const hasContent = Boolean(output) || Boolean(stderr);
@@ -204,11 +268,10 @@ function Terminal({ output, stderr }) {
   return (
     <section
       aria-label="Terminal"
-      className="flex min-h-0 shrink-0 basis-[30%] flex-col border-t"
-      style={{ borderTopColor: TERMINAL_BORDER, backgroundColor: TERMINAL_BG }}
+      className="flex min-h-0 shrink-0 basis-[30%] flex-col bg-slate-900"
     >
-      <header className="shrink-0 px-4 pt-2 pb-1">
-        <span className="font-mono text-xs uppercase tracking-wide text-slate-500">
+      <header className="flex shrink-0 items-center bg-slate-950 px-4 py-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Terminal
         </span>
       </header>
@@ -217,13 +280,13 @@ function Terminal({ output, stderr }) {
         // aria-live so screen readers announce results; the pane is never
         // focusable or editable, matching the read-only requirement.
         aria-live="polite"
-        className="min-h-0 flex-1 overflow-auto px-4 pb-3"
+        className="min-h-0 flex-1 overflow-auto px-4 py-3"
       >
         {hasContent ? (
-          <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-5">
-            {output ? <span style={{ color: TERMINAL_TEXT }}>{output}</span> : null}
+          <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-5 text-slate-50">
+            {output}
             {output && stderr ? "\n" : null}
-            {stderr ? <span className="text-red-600">{stderr}</span> : null}
+            {stderr ? <span className="text-red-400">{stderr}</span> : null}
           </pre>
         ) : (
           <p className="font-mono text-sm leading-5 text-slate-500">
@@ -263,7 +326,7 @@ function ManualEditor({
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
           placeholder="Paste code to review"
-          className="min-h-0 flex-1 resize-none border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-900 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+          className="min-h-0 flex-1 resize-none border border-slate-200 bg-white p-3 font-mono text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400"
         />
         {error ? (
           <p role="alert" className="text-sm text-red-700">
@@ -276,16 +339,14 @@ function ManualEditor({
             type="button"
             onClick={onRun}
             disabled={!canRun}
-            className="px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100"
-            style={{ backgroundColor: RUN_BUTTON_BG }}
+            className="border border-transparent bg-slate-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-slate-700"
           >
             {isExecuting ? "Running..." : "Run Code"}
           </button>
           <button
             type="submit"
             disabled={!canSubmit}
-            className="px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100"
-            style={{ backgroundColor: SUBMIT_BUTTON_BG }}
+            className="border border-transparent bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-indigo-600"
           >
             Submit for Review
           </button>
@@ -297,8 +358,68 @@ function ManualEditor({
   );
 }
 
+/**
+ * Zero-state landing screen. Shown whenever the app is in browse mode with
+ * nothing selected — including the very first paint, since selectedId now
+ * starts at null and is never auto-filled from the fetched list.
+ */
+function Landing({ reviews, onSelectReview, onStartManual }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-8 px-4 text-center">
+      <div className="flex flex-col items-center gap-3">
+        <span className="flex h-12 w-12 items-center justify-center border border-slate-200 bg-white text-slate-400">
+          <CodeIcon className="h-6 w-6" />
+        </span>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          CodeRev Analysis Engine
+        </h1>
+        <p className="max-w-sm text-sm leading-6 text-slate-500">
+          Open a pull request review or run a manual sandbox pass. Findings are
+          scored by severity and rendered next to your code.
+        </p>
+      </div>
+
+      <div className="flex flex-col items-center gap-3 sm:flex-row">
+        {reviews.length > 0 ? (
+          <select
+            value=""
+            onChange={(event) => onSelectReview(Number(event.target.value))}
+            aria-label="Select a pull request review"
+            className="w-72 border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+          >
+            <option value="" disabled>
+              Select a pull request review…
+            </option>
+            {reviews.map((review) => (
+              <option key={review.id} value={review.id}>
+                {reviewLabel(review)}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={onStartManual}
+          className="w-72 border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 sm:w-auto"
+        >
+          New Manual Sandbox Review
+        </button>
+      </div>
+
+      {reviews.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          No pull request reviews yet — open or update a PR to trigger one automatically.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function App() {
   const [reviews, setReviews] = useState([]);
+  // Starts null and is never auto-filled: the app always opens on the
+  // Landing zero-state, and only shows a review once the user picks one.
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -331,7 +452,8 @@ export default function App() {
         const rows = Array.isArray(data) ? data : [];
 
         setReviews(rows);
-        setSelectedId(rows.length > 0 ? rows[0].id : null);
+        // Deliberately no auto-select here — landing the user on the latest
+        // PR by default is what we're moving away from.
       } catch (err) {
         if (err.name === "AbortError") return;
         setError(err.message || "Unable to load reviews.");
@@ -346,16 +468,15 @@ export default function App() {
     return () => controller.abort();
   }, [reloadToken]);
 
-  // Browse mode falls back to the newest row when nothing is explicitly
-  // selected, which keeps the original "open on the latest PR" behavior.
-  // Manual mode never falls back: no selection means "show the editor".
-  const selected = useMemo(() => {
-    const explicit = reviews.find((review) => review.id === selectedId) ?? null;
-    if (explicit || mode === "manual") return explicit;
-    return reviews[0] ?? null;
-  }, [reviews, selectedId, mode]);
+  // No fallback to the newest row in either mode: no explicit selection means
+  // "show the landing/editor state", full stop.
+  const selected = useMemo(
+    () => reviews.find((review) => review.id === selectedId) ?? null,
+    [reviews, selectedId]
+  );
 
   const showEditor = mode === "manual" && !selected;
+  const showLanding = mode === "browse" && !selected;
 
   function startManualReview() {
     setMode("manual");
@@ -462,9 +583,9 @@ export default function App() {
     <button
       type="button"
       onClick={startManualReview}
-      className="shrink-0 whitespace-nowrap rounded border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+      className="shrink-0 whitespace-nowrap border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
     >
-      New Manual Review
+      New Manual Sandbox Review
     </button>
   );
 
@@ -500,7 +621,7 @@ export default function App() {
         {loading ? (
           <div className="flex h-full items-center justify-center gap-2">
             <Spinner />
-            <span className="text-sm text-slate-500">Reviewing code diff...</span>
+            <span className="text-sm text-slate-500">Loading reviews...</span>
           </div>
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -508,40 +629,36 @@ export default function App() {
             <button
               type="button"
               onClick={() => setReloadToken((token) => token + 1)}
-              className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
+              className="bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
             >
               Retry
             </button>
           </div>
-        ) : reviews.length === 0 && mode === "browse" ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3">
-            <p className="text-sm text-slate-500">
-              No reviews yet. Open or update a pull request to trigger one, or submit
-              code manually.
-            </p>
-            {newManualReviewButton}
-          </div>
+        ) : showLanding ? (
+          <Landing
+            reviews={reviews}
+            onSelectReview={selectReview}
+            onStartManual={startManualReview}
+          />
         ) : (
           <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
             <Pane
               title={showEditor ? "Code" : "Diff"}
               action={
                 <div className="flex min-w-0 items-center gap-3">
-                  {mode === "manual" ? (
-                    <button
-                      type="button"
-                      onClick={backToBrowse}
-                      className="shrink-0 whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
-                    >
-                      ← Back to PR reviews
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={backToBrowse}
+                    className="shrink-0 whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                  >
+                    ← Back to start
+                  </button>
                   {reviews.length > 0 ? (
                     <select
                       value={selected?.id ?? ""}
                       onChange={(event) => selectReview(Number(event.target.value))}
                       aria-label="Select a review"
-                      className="min-w-0 max-w-xs truncate rounded border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                      className="min-w-0 max-w-xs truncate border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                     >
                       {selected ? null : (
                         <option value="" disabled>
@@ -555,7 +672,7 @@ export default function App() {
                       ))}
                     </select>
                   ) : null}
-                  {newManualReviewButton}
+                  {mode === "browse" ? newManualReviewButton : null}
                 </div>
               }
             >
@@ -619,11 +736,14 @@ export default function App() {
                   <span className="text-sm text-slate-500">Reviewing code diff...</span>
                 </div>
               ) : (
-                <p className="p-4 text-sm text-slate-500">
-                  {showEditor
-                    ? "Submit code to see the review here."
-                    : "Select a pull request."}
-                </p>
+                // showEditor is guaranteed true here: selected is null and we're
+                // not in the Landing branch, so this only renders for an
+                // opened-but-not-yet-submitted manual review.
+                <EmptyState
+                  icon={<DocumentIcon className="h-8 w-8" />}
+                  title="No review yet"
+                  subtitle="Submit your code to generate a review here."
+                />
               )}
             </Pane>
           </div>
