@@ -26,7 +26,7 @@ Status values: **Accepted** (in use), **Proposed** (not adopted yet, needs owner
 | Package | Version | Status | Why |
 |---|---|---|---|
 | react, react-dom | 18.3.1 | Accepted | UI library. |
-| vite | 6.0.7 | Accepted (dev) | Dev server with `/api` proxy, plus the production build. |
+| vite | 6.4.5 | Accepted (dev) | Dev server with `/api` proxy, plus the production build. Bumped from 6.0.7 within the same major to clear `npm audit` advisories (commit `919e90f`). |
 | @vitejs/plugin-react | 4.3.4 | Accepted (dev) | JSX transform and fast refresh for Vite. |
 | tailwindcss, @tailwindcss/vite | 4.1.11 | Accepted (dev) | Utility CSS. The v4 Vite plugin removes the need for PostCSS config. |
 
@@ -67,3 +67,39 @@ Recorded in full in `docs/EVAL_DESIGN.md`. Summary:
 | pre-commit (dev) | 4.7.0 (`requirements-dev.txt`) | Accepted | Runs ruff and gitleaks on staged changes with one command (`.pre-commit-config.yaml`). Not required for CI, which runs both directly. | A hand-written `.githooks/pre-commit` (the folder is owner-controlled and must not be edited by Kiro); running the two tools by hand, which CONTRIBUTING.md also lists. |
 | gitleaks (CLI binary) | 8.30.1 tested | Accepted (was Proposed) | Secret scan on staged changes, used by the pre-commit gate and the pre-commit hook as a `language: system` hook. It is a standalone binary, so no Go toolchain or Python package is added. | `detect-secrets` (pip dependency); the regex fallback in the steering file (weaker). |
 | Docker (Dockerfile, Compose) | n/a | Accepted | Packaging for a single-container deployment: one multi-stage image builds the frontend and runs uvicorn as a non-root user. Nothing is added to the app's dependencies. Base images: `node:22-alpine` (build stage only) and `python:3.12-slim`. | A plain `pip install` plus `npm run build` on the host (works, but the build is not reproducible across machines); PaaS buildpacks (tie the deploy to one vendor). |
+
+## Design decisions (author to complete)
+
+These are the choices an interviewer or reader will ask about. They are for the author to answer in their own words. Do not fill them in on the author's behalf.
+
+### Why a 1.5B local model?
+
+TODO(author): write in your own words
+
+### Why structured findings instead of counting severity lines?
+
+TODO(author): write in your own words
+
+### How did I define a catch (is_catch) and why that tolerance?
+
+TODO(author): write in your own words
+
+### Why per-file chunking vs whole-diff?
+
+TODO(author): write in your own words
+
+### Why a retry queue instead of dropping offline reviews?
+
+TODO(author): write in your own words
+
+### Why a provider interface?
+
+TODO(author): write in your own words
+
+### Why API-key auth instead of user accounts?
+
+TODO(author): write in your own words
+
+### What did the eval show that surprised me?
+
+TODO(author): write in your own words
