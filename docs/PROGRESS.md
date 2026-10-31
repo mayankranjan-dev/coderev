@@ -26,4 +26,19 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | C7 harness tests with stub provider | done | ffcb629 |
 | C8 labeling guide and author checklist | done | 8a458ab |
 | F1 verification and audit update | done | f14f4f9 |
-| F2 final report | done (report in chat; this row is uncommitted) | |
+| F2 final report | done (report in chat) | bf92f72 |
+
+Second task: CI, audit closure, candidate finder, packaging.
+
+| Item | Status | Commit |
+|---|---|---|
+| D0 commit pending progress log | done | bf92f72 |
+| D1 CI workflow, ruff config, lint fixes | done | 3218e0d |
+| D2 synthetic eval regression gate | done | 15647a3 |
+| D3a size limits for manual submissions and diffs | done | d6f4c89 |
+| D3b pagination on GET /api/reviews | done | 9308088 |
+| D4 candidate finder (eval/suggest.py) | done | 2e79bed |
+| D5 Docker packaging | done (image not built: Docker daemon not running) | 7f61bd2 |
+| D6 deployment guide and env check script | done | ba9e744 |
+| D7 pre-commit, license, contributing | done | e1e6166 |
+| D8 verification and audit update | done (hash shown is the previous commit, e1e6166; this row's own commit hash is not known until it exists) | e1e6166 |
