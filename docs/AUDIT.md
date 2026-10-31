@@ -40,7 +40,7 @@ Updated 2026-10-31 on branch `v2-revamp`. Commit hashes are from `git log --onel
 | P0-2 No file/line location | Resolved | `d9a8bb3` | |
 | P0-3 Silent truncation | Resolved | `751fd04`, `327d71d` | |
 | P0-4 Slow and offline share a status | Resolved | `76e3bae` | |
-| P0-5 No tests, no CI | Resolved, CI verified | `94d2e2d`, `3218e0d`, `15647a3` | Verified with `gh run view 41202667616` on commit `06b4ab8`: all four jobs succeeded (Lint and test on Python 3.11 and 3.12, Frontend build, Synthetic eval regression gate). Run: https://github.com/mayankranjan-dev/coderev/actions/runs/41202667616. The eval gate checks the harness with a stub provider, not model quality. |
+| P0-5 No tests, no CI | Resolved, CI verified | `94d2e2d`, `3218e0d`, `15647a3`, `6850273` | Verified with `gh run view 41202667616` on commit `06b4ab8`: all four jobs succeeded (Lint and test on Python 3.11 and 3.12, Frontend build, Synthetic eval regression gate). Run: https://github.com/mayankranjan-dev/coderev/actions/runs/41202667616. The eval gate checks the harness with a stub provider, not model quality. |
 | P1-1 No auth or rate limiting | Resolved | `67a2c70`, `b3f1695`, `d6f4c89`, `9308088` | |
 | P1-2 Webhook work inside the request | Resolved | `e54f41d` | |
 | P1-3 Duplicate rows on redelivery | Resolved | `e54f41d` | Dedupe is on (repo, PR number, head SHA), not on `X-GitHub-Delivery`. |
@@ -49,11 +49,21 @@ Updated 2026-10-31 on branch `v2-revamp`. Commit hashes are from `git log --onel
 | P2-2 Strict, lossy parser | Resolved | `d9a8bb3` | |
 | P2-3 Nondeterminism not controlled | Resolved for the eval | `751fd04`, `2ccae80` | Production requests still send no seed (by design; only the eval needs one). |
 | P2-4 Dependency and environment hygiene | Partly | `94d2e2d`, `fd8014c`, `ba9e744` | `.env` itself must be synced with `.env.example` by the owner (`scripts/check_env.py` lists the differing names). Two virtualenvs (`.venv`, `venv`) still exist. |
-| P2-5 Frontend not served by the backend | Resolved, Docker run verified by the owner (2026-10-31) | `08c6e0b`, `7f61bd2`, `ba9e744` | Owner reported: `docker compose up --build -d` built, reached `(healthy)`, and `/api/health` returned `{"status":"ok","ollama_reachable":false}` (Ollama is on the host). Details in `docs/DEPLOY.md`. Port now bound to loopback. |
-| P3-1 README accuracy | Open | | Not touched in this task. |
+| P2-5 Frontend not served by the backend | Resolved, Docker run verified by the owner (2026-10-31) | `08c6e0b`, `7f61bd2`, `ba9e744`, `06b4ab8` | Owner reported: `docker compose up --build -d` built, reached `(healthy)`, and `/api/health` returned `{"status":"ok","ollama_reachable":false}` (Ollama is on the host). Details in `docs/DEPLOY.md`. Port now bound to loopback. |
+| P3-1 README accuracy | Resolved | `0e1a842` | README rewritten: stale line counts, dead demo and docs links, the wrong walrus-operator advice, the fake-key example and unmeasured "detects X" claims are gone. Results are stated as `TBD (not yet measured)` until a real run exists. Screenshots are still to be added by the owner (`docs/img/README.md`). |
+| NEW-1 Frontend dependency advisories (found 2026-10-31 by `npm audit`) | Resolved | `919e90f` | Before: 3 vulnerabilities (1 moderate, 2 high), all in dev dependencies (`vite`, `esbuild`, `source-map-js`). After: 0 vulnerabilities (`npm audit`). `source-map-js` fixed by `npm audit fix`; vite bumped 6.0.7 to 6.4.5 (same major, build passes, no UI change). |
 | P3-2 Untracked files | Open | | Owner decision. |
 
-This table reflects the repository as of commit `e1e6166`.
+This table reflects the repository as of commit `7c70bb0`.
+
+### Still open
+
+- **P2-4 (partly):** the owner's `.env` lacks 19 names that `.env.example` lists (`scripts/check_env.py`, names only, exit 1); two virtualenvs (`.venv`, `venv`) still exist.
+- **P3-2:** `PROJECT_CONTEXT.md` and `assets/` are untracked; owner decision.
+- **P1-3 (residual):** dedupe is on (repo, PR, head SHA), not on `X-GitHub-Delivery`.
+- **P2-3 (residual):** production requests send no seed, by design.
+- **Docker with a reachable Ollama:** the owner's verified run had Ollama unreachable, so `"ollama_reachable":true` from inside the container has not been observed.
+- **Evaluation:** no labeled cases, `is_catch` is not implemented, and no run has been measured. Owner work; see `docs/eval/AUTHOR_TODO.md`.
 
 ## Problems, in priority order
 
