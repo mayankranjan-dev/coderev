@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3  # keep equal to ruff in requirements-dev.txt
+    hooks:
+      - id: ruff-check
+  # Uses the gitleaks binary on PATH (no Go toolchain needed). Install it from
+  # https://github.com/gitleaks/gitleaks; the version tested here is 8.30.1.
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        entry: gitleaks git --staged --redact --no-banner
+        language: system
+        pass_filenames: false
