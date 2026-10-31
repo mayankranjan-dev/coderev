@@ -53,7 +53,7 @@ from frontend_static import FrontendApp, frontend_dist_dir
 from reviewer import engine
 from reviewer.engine import EngineConfig, counts, run_review
 from reviewer.findings import Finding, parse_review
-from reviewer.prompts import build_review_prompt
+from reviewer import prompts
 from reviewer.providers import OllamaProvider, ReviewProvider
 from security import cors_origins_from_env, rate_limit, require_api_key
 
@@ -77,6 +77,13 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 REVIEW_CHUNKING = os.getenv("REVIEW_CHUNKING", "whole")
 # Extra attempts when the model's output is blank or has no parseable line.
 REVIEW_MAX_RETRIES = int(os.getenv("REVIEW_MAX_RETRIES", "1"))
+# Which prompts/<version>.txt template production uses. v1 stays the default
+# until an eval run shows another version does better.
+REVIEW_PROMPT_VERSION = os.getenv("REVIEW_PROMPT_VERSION", prompts.DEFAULT_VERSION)
+
+
+def build_review_prompt(code_text: str) -> str:
+    return prompts.build_prompt(REVIEW_PROMPT_VERSION, code_text)
 
 # Judge0 Community Edition runs submitted code in an isolated worker with its
 # own CPU/memory/process limits. Execution is deliberately delegated to it
@@ -105,6 +112,9 @@ async def lifespan(_app: FastAPI):
     # Tables are created at startup, not at import, so importing this module
     # (tests, scripts) never creates audit.db as a side effect.
     database.init_db()
+    # Fail at startup, not on the first review, if the configured prompt
+    # version is missing or malformed.
+    prompts.load_template(REVIEW_PROMPT_VERSION)
 
     stop = asyncio.Event()
     worker = None

@@ -1,65 +1,77 @@
 """
-Review prompt builder.
+Versioned review prompts.
 
-Prompt tuned against qwen2.5-coder:1.5b. Behaviors that shaped it, found by
-direct experimentation against Ollama's /api/generate endpoint:
+Templates live in prompts/<version>.txt at the repo root and are selected by
+REVIEW_PROMPT_VERSION. Each template contains the placeholder {{CODE}}
+exactly once; the code is inserted with str.replace (not str.format) because
+code is full of braces.
 
-1. A concrete few-shot example makes this model anchor on the example's
-   literal wording and repeat a lookalike finding, even when the code does
-   not have that problem. The format example therefore uses placeholders
-   only (<bug or security issue>, <specific fix>), never real-looking code,
-   identifiers, or vulnerability names. This is a project rule.
-2. Without an explicit checklist of issue categories, the model reports only
-   the first issue it notices. The checklist plus "report EVERY issue on its
-   own line" gets multiple findings out, one per line.
-3. "Correction: ..." must be on the same line as the severity tag. The parser
+- v1: the original production prompt, cleaned up. Same checklist and rules,
+  plus the output contract (path:line location, NO_ISSUES_FOUND sentinel),
+  the placeholder-only example, and one severity rule for secrets.
+- v2: restructured for a small model. Says how to read +/- lines, gives a
+  numbered checklist mapped to severities, and spells out how to count
+  new-file line numbers from the @@ header. Whether v2 reviews better than
+  v1 is not measured yet; the eval harness (eval/) exists to measure it.
+
+Rules every template must follow (enforced by tests/test_prompt.py):
+
+1. No concrete few-shot examples. The format example uses placeholders only
+   (<bug or security issue>, <specific fix>), never real-looking code,
+   identifiers, or vulnerability names. A concrete example makes
+   qwen2.5-coder:1.5b anchor on it and repeat a lookalike finding even when
+   the code does not have that problem (observed during development; not
+   measured). Eval-only variants that break this rule must not live in
+   prompts/ and must never be loadable from the production path.
+2. "Correction: ..." stays on the same line as the severity tag. The parser
    (reviewer/findings.py) splits on newlines, so a correction on its own line
    would not be attached to any finding.
-
-Each finding carries a location (path and new-file line range) so findings can
-be scored by location, and a NO_ISSUES_FOUND sentinel lets a clean review be
-told apart from a format failure.
+3. A hardcoded secret or credential is CRITICAL, in both the checklist and the
+   severity rules.
+4. An explicit issue checklist and "report EVERY issue" are kept: without
+   them this model tends to report only the first issue it notices.
 """
 
+import re
+from functools import lru_cache
+from pathlib import Path
+
 CODE_PLACEHOLDER = "{{CODE}}"
-
-_TEMPLATE = (
-    "You are an expert automated code reviewer. Analyze the code for security "
-    "vulnerabilities, bugs, and code smells. The input may be a unified diff or "
-    "a standalone snippet.\n\n"
-    "Check specifically for: injection vulnerabilities (SQL/command/etc.), "
-    "hardcoded secrets or credentials, missing error handling, correctness "
-    "bugs, and naming or style issues. Report EVERY issue you find, each on its "
-    "own line, not just the first one.\n\n"
-    "Strict Output Rules:\n"
-    "- Each finding is exactly one line. Never merge findings onto one line.\n"
-    "- Line format: SEVERITY: path:start-end description Correction: fix\n"
-    "- SEVERITY is exactly one of CRITICAL, WARNING, NITPICK.\n"
-    "- path is the file path from the diff header (without a/ or b/). For a "
-    "standalone snippet use the path snippet.\n"
-    "- start-end are line numbers in the new version of the file (the + side "
-    "of the diff, counted from the @@ hunk header). For one line write start "
-    "only.\n"
-    "- CRITICAL = security vulnerabilities (injection, hardcoded secrets, auth "
-    "bypass) or correctness bugs.\n"
-    "- WARNING = design or maintainability concerns that are not security bugs "
-    "(missing error handling, poor structure).\n"
-    "- NITPICK = pure style (naming, formatting, comments).\n"
-    "- Every finding must give a specific, actionable correction on the same "
-    "line, introduced by \"Correction:\". Never put the correction on its own "
-    "line.\n"
-    "- If there are no issues, output exactly one line: NO_ISSUES_FOUND\n"
-    "- Do not include conversational intro/outro, repeat the code, or use "
-    "markdown.\n\n"
-    "Example Output (format only, unrelated to the code below):\n"
-    "CRITICAL: <path>:<start>-<end> <bug or security issue> Correction: <specific fix>\n"
-    "WARNING: <path>:<line> <design or maintainability concern> Correction: <specific fix>\n"
-    "NITPICK: <path>:<line> <style issue> Correction: <specific fix>\n\n"
-    "Analyze this code:\n"
-    + CODE_PLACEHOLDER
-)
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+DEFAULT_VERSION = "v1"
+_VERSION_RE = re.compile(r"^v[0-9]{1,3}$")
 
 
-def build_review_prompt(code_text: str) -> str:
-    # str.replace, not str.format: code is full of braces.
-    return _TEMPLATE.replace(CODE_PLACEHOLDER, code_text)
+class PromptError(ValueError):
+    pass
+
+
+def available_versions() -> list:
+    return sorted(p.stem for p in PROMPTS_DIR.glob("v*.txt") if _VERSION_RE.match(p.stem))
+
+
+@lru_cache(maxsize=None)
+def load_template(version: str) -> str:
+    # The version is config input: restrict it to vN so it can never name a
+    # file outside prompts/.
+    if not isinstance(version, str) or not _VERSION_RE.match(version):
+        raise PromptError(f"invalid prompt version {version!r}; expected one of {available_versions()}")
+    path = PROMPTS_DIR / f"{version}.txt"
+    if not path.is_file():
+        raise PromptError(f"unknown prompt version {version!r}; expected one of {available_versions()}")
+    template = path.read_text(encoding="utf-8")
+    if template.count(CODE_PLACEHOLDER) != 1:
+        raise PromptError(f"prompts/{version}.txt must contain {CODE_PLACEHOLDER} exactly once")
+    return template
+
+
+def build_prompt(version: str, code_text: str) -> str:
+    template = load_template(version)
+    before, after = template.split(CODE_PLACEHOLDER)
+    # Concatenate rather than replace so a {{CODE}} inside the code is inert,
+    # and drop the template's trailing newline so the code ends the prompt.
+    return before + code_text + after.rstrip("\n")
+
+
+def build_review_prompt(code_text: str, version: str = DEFAULT_VERSION) -> str:
+    return build_prompt(version, code_text)
