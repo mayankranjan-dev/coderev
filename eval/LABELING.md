@@ -10,6 +10,36 @@ The case file is label data. Kiro does not write or edit entries (`.kiro/steerin
 2. Copy `eval/cases.example.yaml` to `eval/cases.yaml`, delete the three fake entries, and set `categories:` to your final taxonomy (or remove the key to allow any category string).
 3. Keep a rejection log outside the case file (format up to you): one line per rejected candidate with repo, SHA, and reason. This is the main defense against cherry-picking (`LABELING_RULES.md` §3).
 
+## Shortlist candidates (optional): `eval/suggest.py`
+
+This tool only saves search time. It does not label anything and it never writes `eval/cases.yaml`.
+
+```powershell
+.\.venv\Scripts\python.exe -m eval.suggest https://github.com/owner/repo https://github.com/owner/other
+.\.venv\Scripts\python.exe -m eval.suggest --repos-file my_repos.txt --max-py-files 3 --max-lines 50
+```
+
+What it does, per public repo:
+
+1. Lists commits through the GitHub API dated on or after the cutoff (default `2025-01-01`, from `docs/EVAL_DESIGN.md` §6.1; override with `--cutoff`). `--order oldest` (default) walks forward from the cutoff, `--order newest` backwards.
+2. Keeps single-parent commits that touch at least one non-test `.py` file, at most `--max-py-files` of them (N), with at most `--max-lines` changed lines in those files (M). The defaults, 3 and 50, are the *suggested* values in `LABELING_RULES.md` §4.2, not your decision. Change them to match your answer.
+3. Writes a draft to `eval/candidates.yaml` for each match: a **bug-fix candidate** if the commit message contains fix, bug, regression, crash or vulnerability, otherwise a **control candidate**. Both carry repo, parent SHA, fix SHA, date, message, link, the non-test Python files, and the changed-line count.
+4. Prints a count of rejections by reason (merge, before cutoff, too many files, too many lines, and so on). That is the start of your rejection log (`LABELING_RULES.md` §3); the tool does not save it to a file.
+
+What it leaves to you:
+
+- `buggy_file`, `line_start`, `line_end` and `category` are `null` on bug-fix candidates, and every entry has `todo: "TODO(author): verify and label"`. The message match is a search filter, not evidence that the commit is a bug. A candidate may be a feature, a typo fix, or a bug visible only outside Python.
+- Controls get no label fields. Whether a control is acceptable (not a fix, not reverted later) is your rule 7.1.
+- To use a candidate, check it against `LABELING_RULES.md` §4, then copy the fields you accept into `eval/cases.yaml` yourself. The draft file has a `candidates:` key, not `cases:`, so it cannot be loaded as a case file by mistake. The tool refuses any output file named `cases.yaml`.
+
+Rate limits and caching:
+
+- Without a token GitHub allows 60 API requests per hour. Each commit that passes the message filter costs one request, so expect a handful of candidates per hour. With a token the limit is 5000 per hour.
+- To use a token, set it in your shell before running: `$env:GITHUB_TOKEN = "<your token>"`. A token with no scopes is enough for public repos. The tool reads the process environment only (it does not read `.env`), sends the token only to `api.github.com`, and never prints it.
+- Every API response is cached in `eval/cache/github_api/` (gitignored), so re-running costs nothing. Use `--refresh` to refetch.
+- When the quota runs out, a wait of up to `--max-wait-s` (default 60) is taken. A longer wait stops the run, keeps what was found, and exits with code 3. Re-run after the reset; cached responses are reused.
+- Re-running keeps entries already in `eval/candidates.yaml` (matched by `fix_sha`) and adds new ones. Comments in that file are not preserved, so keep notes in a `notes:` field or in your rejection log.
+
 ## Bug cases, step by step
 
 For each repo on your list, walk candidates in the order your sampling rule says (for example, first-parent history forward from the cutoff date):
