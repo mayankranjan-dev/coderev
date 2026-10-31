@@ -38,14 +38,21 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null ||
             fail "non-fast-forward or force push to $remote_ref is not allowed."
     fi
-done
 
-# Secret scan.
-if "$GITLEAKS" git --help >/dev/null 2>&1; then
-    "$GITLEAKS" git --no-banner || fail "gitleaks found leaks."
-else
-    "$GITLEAKS" detect --no-banner || fail "gitleaks found leaks."
-fi
+    # Secret scan: only the commits being pushed.
+    if ! is_zero "$remote_sha"; then
+        RANGE="$remote_sha..$local_sha"
+    elif git rev-parse --verify --quiet origin/main >/dev/null; then
+        RANGE="origin/main..$local_sha"
+    else
+        RANGE="$local_sha"
+    fi
+    if "$GITLEAKS" git --help >/dev/null 2>&1; then
+        "$GITLEAKS" git --no-banner --log-opts="$RANGE" || fail "gitleaks found leaks in $RANGE."
+    else
+        "$GITLEAKS" detect --no-banner --log-opts="$RANGE" || fail "gitleaks found leaks in $RANGE."
+    fi
+done
 
 # Test gate.
 ROOT="$(git rev-parse --show-toplevel)"
