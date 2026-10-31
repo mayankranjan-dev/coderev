@@ -883,3 +883,5 @@ SOFTWARE.
 [⬆ Back to Top](#-coderev-bot)
 
 </div>
+
+**Git hooks:** fresh clones must run `powershell -File scripts/setup-hooks.ps1` once to enable the pre-push guard.
