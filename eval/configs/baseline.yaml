@@ -1,0 +1,19 @@
+# Baseline config, docs/EVAL_DESIGN.md §5.1. Every ablation varies one field
+# of this file (see eval/ablation.yaml).
+name: baseline
+provider: ollama
+model: qwen2.5-coder:1.5b
+prompt_version: v1
+chunking: whole
+retry: true
+max_retries: 2
+num_ctx: 8192
+temperature: 0.2
+timeout_s: 600
+base_url: http://localhost:11434
+seeds: [1, 2, 3]
+context_lines: 3
+include_tests: false
+cutoff: "2025-01-01"
+warmup: true
+production_timeout_s: 10

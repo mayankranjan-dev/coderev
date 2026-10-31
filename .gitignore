@@ -20,6 +20,9 @@ frontend/dist/
 .vscode/
 # Eval: fetched third-party repos and diffs (never committed)
 eval/cache/
+# Eval run artifacts. Raw model output can quote third-party code, so runs
+# are local by default; add a run you want to publish with `git add -f`.
+eval/results/
 # Local-only files
 PROJECT_CONTEXT.md
 assets/
