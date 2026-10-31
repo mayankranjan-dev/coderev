@@ -53,4 +53,5 @@ Third task: CI verification, security, Docker, documentation. A row's own commit
 | E3 CI loop | done (run 41202667616 on 06b4ab8 green on all 4 jobs; 0 fix iterations needed) | n/a |
 | E4 record verified CI run | done | 6850273 |
 | D1 screenshot capture list | done | 7bc285f |
-| D2 README rewrite (RESULTS_STATE: NOT_YET) | done | pending |
+| D2 README rewrite (RESULTS_STATE: NOT_YET) | done | 0e1a842 |
+| D3 architecture notes | done | pending |
