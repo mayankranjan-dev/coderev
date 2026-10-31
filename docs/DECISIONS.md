@@ -41,7 +41,7 @@ Status values: **Accepted** (in use), **Proposed** (not adopted yet, needs owner
 
 | Tool | Status | Why | Alternatives |
 |---|---|---|---|
-| pytest (dev) | Proposed | Test runner for the pre-commit gate once tests are requested. Would go in `requirements-dev.txt`. | Stdlib `unittest`: zero deps but more boilerplate. A reasonable choice if the owner wants zero dev deps. |
+| pytest (dev) | Accepted (9.2.0, `requirements-dev.txt`) | Test runner for the pre-commit gate and the pre-push hook. Fixtures (`tmp_path`, `monkeypatch`) give each test its own SQLite file and stubbed Ollama/Judge0 without extra code. | Stdlib `unittest`: zero deps but more boilerplate and no fixture injection. `pytest-asyncio` was not added: async code is driven with `asyncio.run` and FastAPI's `TestClient`, so the stdlib covers it. |
 | gitleaks (CLI binary) | Proposed | A real secret scanner for the pre-commit gate. It is a standalone binary, so it adds no Python dependency. | `detect-secrets` (a pip dependency); the regex fallback in the steering file (weak, but zero install). |
 | git CLI (for eval) | Proposed | The eval harness fetches fix and parent commits with `git fetch --depth` into a gitignored cache, so diffs are never copied into the repo. No new Python dependency. | GitHub REST API via `httpx` (subject to rate limits without a token); GitHub `.diff` URLs (no reverse diff, no file contents at the parent commit). |
 

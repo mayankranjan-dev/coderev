@@ -25,7 +25,8 @@ import hashlib
 import hmac
 import logging
 import os
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -35,7 +36,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import Base, SessionLocal, engine, get_db
+import database
+from database import SessionLocal, get_db
 from models import PRReview
 
 load_dotenv()
@@ -72,11 +74,15 @@ JUDGE0_STATUS_ACCEPTED = 3
 # Guards against shipping a multi-megabyte paste to a shared free service.
 MAX_EXECUTE_CODE_CHARS = int(os.getenv("MAX_EXECUTE_CODE_CHARS", "50000"))
 
-# Create tables on startup. For a production system with migrations this
-# would be replaced by Alembic, but that's out of scope here.
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Tables are created at startup, not at import, so importing this module
+    # (tests, scripts) never creates audit.db as a side effect.
+    database.init_db()
+    yield
 
-app = FastAPI(title="CodeRev Bot", version="1.0.0")
+
+app = FastAPI(title="CodeRev Bot", version="1.0.0", lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
