@@ -17,3 +17,6 @@ frontend/dist/
 
 # Editor
 .vscode/
+# Local-only files
+PROJECT_CONTEXT.md
+assets/
