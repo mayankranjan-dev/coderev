@@ -13,12 +13,13 @@ Status values: **Accepted** (in use), **Proposed** (not adopted yet, needs owner
 | sqlalchemy | 2.0.35 | Accepted | ORM plus a swap path from SQLite to Postgres through `DATABASE_URL`. | Stdlib `sqlite3` (no backend portability). |
 | httpx | 0.27.2 | Accepted | Async HTTP client for Ollama, Judge0, and GitHub diff fetching. A blocking client would stall the event loop. | `requests` (sync only); `aiohttp` (larger API surface). |
 | python-dotenv | 1.0.1 | Accepted | Loads `.env` for local development. | Reading `os.environ` only, which makes local setup clunkier. |
+| pydantic | 2.13.5 | Accepted | Imported directly by `main.py` for request/response models. Already installed as a FastAPI dependency; pinned explicitly so the version the code was tested with is the one installed. Not a new package. | Leaving it implicit through FastAPI's range (resolves to whatever is newest). |
 
-## Undeclared dependency
+## Removed dependency
 
 | Package | Status | Notes |
 |---|---|---|
-| requests | Proposed: remove | Imported only by `simulate_pr.py` and missing from `requirements.txt`, so a clean install breaks that script. Recommended fix: rewrite `simulate_pr.py` with `httpx` (already a dependency) instead of adding `requests`. Owner to decide. |
+| requests | Rejected | Was imported only by `simulate_pr.py` and missing from `requirements.txt`. `simulate_pr.py` now uses `httpx`, which is already a dependency. |
 
 ## Frontend dependencies (`frontend/package.json`)
 
