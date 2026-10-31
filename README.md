@@ -878,7 +878,7 @@ SOFTWARE.
 
 <div align="center">
 
-**Built with ❤️ by the CodeRev Team**
+**Made by Mayank Ranjan**
 
 [⬆ Back to Top](#-coderev-bot)
 
