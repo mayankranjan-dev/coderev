@@ -30,6 +30,29 @@ Verified by reading the code unless marked otherwise.
 - **Frontend.** Builds cleanly (verified). Zero-state Landing is intact: `selectedId` starts `null` and the `selected` memo has no `reviews[0]` fallback. Terminal is dark (`bg-slate-900` / `bg-slate-950`). The frontend finding parser uses the same prefix rule as the backend, so counts and rendering agree.
 - **Secrets hygiene in git.** `git ls-files` shows `.env` and `audit.db` are not tracked, and `.gitignore` covers them.
 
+## Resolution status
+
+Updated 2026-10-31 on branch `v2-revamp`. Commit hashes are from `git log --oneline`. "Partly" means part of the finding is fixed and the rest is listed as open.
+
+| Finding | Status | Commits | Still open |
+|---|---|---|---|
+| P0-1 Concrete few-shot examples | Resolved | `d9a8bb3`, `df0fa5a` | |
+| P0-2 No file/line location | Resolved | `d9a8bb3` | |
+| P0-3 Silent truncation | Resolved | `751fd04`, `327d71d` | |
+| P0-4 Slow and offline share a status | Resolved | `76e3bae` | |
+| P0-5 No tests, no CI | Partly | `94d2e2d` | No CI workflow exists. The pre-push hook runs the suite locally. |
+| P1-1 No auth or rate limiting | Partly | `67a2c70`, `b3f1695` | No size cap on `code_snippet` for manual reviews; no pagination on `GET /api/reviews`. |
+| P1-2 Webhook work inside the request | Resolved | `e54f41d` | |
+| P1-3 Duplicate rows on redelivery | Resolved | `e54f41d` | Dedupe is on (repo, PR number, head SHA), not on `X-GitHub-Delivery`. |
+| P1-4 No retry for offline reviews | Resolved | `76e3bae`, `e54f41d` | |
+| P2-1 Exception handling gaps | Partly | `e54f41d`, `76e3bae`, `751fd04` | The diff response body still has no size limit. |
+| P2-2 Strict, lossy parser | Resolved | `d9a8bb3` | |
+| P2-3 Nondeterminism not controlled | Resolved for the eval | `751fd04`, `2ccae80` | Production requests still send no seed (by design; only the eval needs one). |
+| P2-4 Dependency and environment hygiene | Partly | `94d2e2d`, `fd8014c` | `.env` itself must be synced with `.env.example` by the owner. Two virtualenvs (`.venv`, `venv`) still exist. |
+| P2-5 Frontend not served by the backend | Partly | `08c6e0b` | No deployment docs or config. |
+| P3-1 README accuracy | Open | | Not touched in this task. |
+| P3-2 Untracked files | Open | | Owner decision. |
+
 ## Problems, in priority order
 
 P0 = blocks the evaluation goal or is a live regression. P1 = must fix before anything is publicly reachable. P2 = correctness and hygiene. P3 = docs accuracy.
