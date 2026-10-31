@@ -59,3 +59,8 @@ Recorded in full in `docs/EVAL_DESIGN.md`. Summary:
 
 - The eval uses the stdlib plus `httpx` only. Statistics (mean, sample standard deviation, bootstrap) are computed with `statistics` and `random`, not numpy or scipy.
 - Bug items are shown to the reviewer as the reverse of the fix (parent state introduced as a change). The reason and its threat to validity are documented in the eval design.
+## CI and lint tooling
+| Tool | Version | Status | Why | Alternatives considered |
+|---|---|---|---|---|
+| ruff (dev) | 0.17.3 (equirements-dev.txt) | Accepted | Linter run in CI and pre-commit. One binary, fast, configured in pyproject.toml. | lake8 plus plugins (several packages, slower); pylint (slow, noisy); stdlib compileall (syntax only, no unused-import or undefined-name checks). |
+| GitHub Actions (external service) | n/a | Accepted | Runs tests, lint and the frontend build on push and pull request. The repository is already on GitHub, so no extra service is needed. Uses ctions/checkout, ctions/setup-python, ctions/setup-node. | Other CI hosts need separate accounts. |

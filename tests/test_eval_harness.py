@@ -7,7 +7,6 @@ these pass whether or not it is implemented.
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 import yaml

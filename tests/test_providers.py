@@ -43,7 +43,8 @@ def test_seed_omitted_when_not_given():
 
 
 def test_truncation_suspected_when_prompt_fills_context():
-    handler = lambda request: httpx.Response(200, json={"response": "x", "prompt_eval_count": 4096})
+    def handler(request):
+        return httpx.Response(200, json={"response": "x", "prompt_eval_count": 4096})
     assert asyncio.run(make(handler).generate("p")).truncation_suspected
 
 
