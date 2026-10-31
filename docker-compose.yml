@@ -7,7 +7,9 @@ services:
     build: .
     image: coderev-bot:local
     ports:
-      - "${PORT:-8000}:8000"
+      # Bound to loopback: only this machine can reach the app. To publish on
+      # a server, change "127.0.0.1" to "0.0.0.0" (see docs/DEPLOY.md).
+      - "127.0.0.1:${PORT:-8000}:8000"
     environment:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       CODEREV_API_KEY: ${CODEREV_API_KEY:-}

@@ -49,7 +49,7 @@ Updated 2026-10-31 on branch `v2-revamp`. Commit hashes are from `git log --onel
 | P2-2 Strict, lossy parser | Resolved | `d9a8bb3` | |
 | P2-3 Nondeterminism not controlled | Resolved for the eval | `751fd04`, `2ccae80` | Production requests still send no seed (by design; only the eval needs one). |
 | P2-4 Dependency and environment hygiene | Partly | `94d2e2d`, `fd8014c`, `ba9e744` | `.env` itself must be synced with `.env.example` by the owner (`scripts/check_env.py` lists the differing names). Two virtualenvs (`.venv`, `venv`) still exist. |
-| P2-5 Frontend not served by the backend | Resolved, Docker build not verified | `08c6e0b`, `7f61bd2`, `ba9e744` | `Dockerfile`, `docker-compose.yml` and `docs/DEPLOY.md` exist. The image has not been built: the Docker daemon was not running. |
+| P2-5 Frontend not served by the backend | Resolved, Docker run verified by the owner (2026-10-31) | `08c6e0b`, `7f61bd2`, `ba9e744` | Owner reported: `docker compose up --build -d` built, reached `(healthy)`, and `/api/health` returned `{"status":"ok","ollama_reachable":false}` (Ollama is on the host). Details in `docs/DEPLOY.md`. Port now bound to loopback. |
 | P3-1 README accuracy | Open | | Not touched in this task. |
 | P3-2 Untracked files | Open | | Owner decision. |
 

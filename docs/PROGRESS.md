@@ -42,3 +42,11 @@ Second task: CI, audit closure, candidate finder, packaging.
 | D6 deployment guide and env check script | done | ba9e744 |
 | D7 pre-commit, license, contributing | done | e1e6166 |
 | D8 verification and audit update | done (hash shown is the previous commit, e1e6166; this row's own commit hash is not known until it exists) | e1e6166 |
+
+Third task: CI verification, security, Docker, documentation. A row's own commit hash is filled in by the next commit.
+
+| Item | Status | Commit |
+|---|---|---|
+| E0 gh auth and CI runs | done (authenticated; last 5 runs on v2-revamp all passed) | n/a |
+| E1 frontend vulnerabilities | done (vite 6.0.7 to 6.4.5; npm audit: 0 vulnerabilities) | 919e90f |
+| E2 Docker verified, loopback bind | done | pending |

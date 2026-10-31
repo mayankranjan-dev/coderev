@@ -70,7 +70,36 @@ docker run --rm -p 8000:8000 -v coderev-data:/data `
   coderev-bot:local
 ```
 
-Status: **not run.** Docker is installed on the development machine but the Docker daemon was not running on 2026-10-31 (`docker version` could not reach `dockerDesktopLinuxEngine`), so the image was never built here and the commands above have not been executed. The first `docker compose up --build` is the verification step. The image has a `HEALTHCHECK` on `/api/health`, so `docker compose ps` should show `healthy` once it is up.
+### Verified Docker run
+
+Status: **verified by the owner on 2026-10-31** (reported by the owner; the assistant session could not reach a Docker daemon and did not run this itself). On the owner's machine:
+
+```powershell
+docker compose up --build -d
+```
+
+- The image built.
+- `docker compose ps` showed the container as `(healthy)`. The image has a `HEALTHCHECK` on `/api/health`.
+- `GET http://127.0.0.1:8000/api/health` returned:
+
+```json
+{"status":"ok","ollama_reachable":false}
+```
+
+Why `ollama_reachable` is `false` here: Ollama runs on the host, not in the container. The container's `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434`, and that address only works if Ollama is running on the host and accepts connections from the Docker network. With Ollama stopped, or listening only on a host address the container cannot reach, the health check reports `false` while `status` stays `ok`. Reviews submitted in that state are stored as `llm_offline_pending` and retried.
+
+To point the container at Ollama on the host:
+
+1. Start Ollama on the host and pull the model (`ollama pull qwen2.5-coder:1.5b`).
+2. Leave `OLLAMA_BASE_URL` unset (the Compose default is `http://host.docker.internal:11434`), or set it explicitly in your shell before `docker compose up`.
+3. On Docker Desktop (Windows, macOS) this usually works as is. On Linux, Compose maps `host.docker.internal` to the host gateway (`extra_hosts`), but Ollama must also listen on an address that gateway reaches, for example `OLLAMA_HOST=0.0.0.0` (see "Exposing Ollama" for the risk).
+4. Recheck: `curl http://127.0.0.1:8000/api/health` should show `"ollama_reachable":true`. This step is **not run** (the owner's run had Ollama unreachable).
+
+### Port binding
+
+`docker-compose.yml` publishes the port on loopback only: `"127.0.0.1:${PORT:-8000}:8000"`. Only processes on the same machine can connect. The app has an API key but no user accounts, so loopback is the safe default.
+
+To serve other machines (a server, or a GitHub webhook that must reach the host), edit that line to `"0.0.0.0:${PORT:-8000}:8000"` (or just `"${PORT:-8000}:8000"`). Before you do, set `CODEREV_API_KEY` and `WEBHOOK_SECRET`, and put a TLS-terminating reverse proxy in front. Docker's published ports bypass some host firewall rules, so do not rely on the host firewall alone.
 
 ## Environment variables
 
