@@ -11,8 +11,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | A4 retry queue | done | 76e3bae |
 | A5 dependency and config drift | done | fd8014c |
 | A6 serve built frontend | done | 08c6e0b |
-| B1 review provider interface | done | (next commit) |
-| B2 structured findings and tolerant parser | todo | |
+| B1 review provider interface | done | 751fd04 |
+| B2 structured findings and tolerant parser | done | (next commit) |
 | B3 diff line mapping and chunking | todo | |
 | B4 typed failure handling with bounded retry | todo | |
 | B5 versioned prompts, placeholder-only | todo | |

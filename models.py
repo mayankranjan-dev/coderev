@@ -34,6 +34,9 @@ class PRReview(Base):
 
     diff_text = Column(Text, nullable=True)
     review_text = Column(Text, nullable=True)
+    # JSON list of reviewer.findings.Finding dicts. NULL for rows reviewed
+    # before structured findings existed; the API re-parses review_text then.
+    findings_json = Column(Text, nullable=True)
 
     critical_count = Column(Integer, default=0, nullable=False)
     warning_count = Column(Integer, default=0, nullable=False)

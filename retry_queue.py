@@ -19,6 +19,7 @@ this module does not depend on main.py and tests can supply stubs.
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -70,6 +71,8 @@ def apply_review_result(review: PRReview, result: dict, now: Optional[datetime] 
     review.critical_count = result.get("critical_count", 0)
     review.warning_count = result.get("warning_count", 0)
     review.nitpick_count = result.get("nitpick_count", 0)
+    findings = result.get("findings")
+    review.findings_json = json.dumps(findings) if findings is not None else None
 
     status = result.get("status", "llm_error")
     if status in RETRYABLE_STATUSES:

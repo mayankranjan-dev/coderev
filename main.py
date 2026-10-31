@@ -51,6 +51,8 @@ from database import SessionLocal, get_db
 from models import PRReview
 from frontend_static import FrontendApp, frontend_dist_dir
 from reviewer import providers
+from reviewer.findings import Finding, parse_review
+from reviewer.prompts import build_review_prompt
 from reviewer.providers import OllamaProvider, ProviderError, ReviewProvider
 from security import cors_origins_from_env, rate_limit, require_api_key
 
@@ -137,6 +139,33 @@ manual_review_rate_limit = rate_limit("manual_review", "RATE_LIMIT_REVIEW_PER_MI
 # Pydantic response models
 # ---------------------------------------------------------------------------
 
+class FindingOut(BaseModel):
+    severity: str
+    file: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    message: str
+    correction: Optional[str] = None
+
+
+def findings_for(review: PRReview) -> list[FindingOut]:
+    """
+    Stored findings if present; otherwise parse review_text, so rows written
+    before findings_json existed still render as structured findings.
+    """
+    raw = None
+    if review.findings_json:
+        try:
+            raw = json.loads(review.findings_json)
+        except ValueError:
+            raw = None
+    if isinstance(raw, list):
+        findings = [Finding.from_dict(item) for item in raw if isinstance(item, dict)]
+    else:
+        findings = parse_review(review.review_text or "").findings
+    return [FindingOut(**finding.to_dict()) for finding in findings]
+
+
 class ReviewOut(BaseModel):
     id: int
     repo_name: str
@@ -150,8 +179,15 @@ class ReviewOut(BaseModel):
     nitpick_count: int
     status: str
     created_at: datetime
+    findings: list[FindingOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_row(cls, review: PRReview) -> "ReviewOut":
+        out = cls.model_validate(review)
+        out.findings = findings_for(review)
+        return out
 
 
 class HealthOut(BaseModel):
@@ -217,86 +253,6 @@ class SandboxError(RuntimeError):
     """
 
 
-def build_review_prompt(code_text: str) -> str:
-    """
-    Prompt tuned against qwen2.5-coder:1.5b (see also OLLAMA_MODEL). Two
-    behaviors specific to this small model drove the shape of this prompt,
-    found by direct experimentation against the /api/generate endpoint:
-
-    1. A concrete few-shot example (e.g. a finding about a variable named
-       'r') makes the model anchor on that example's literal wording and
-       repeat a lookalike finding almost verbatim, even when the actual
-       code doesn't have that specific problem. A placeholder example
-       ("<bug or security issue>") avoids this while still teaching the
-       output format.
-    2. Without an explicit checklist of issue categories, the model reports
-       only the first issue it notices and stops. The checklist plus
-       "report EVERY issue on its own line" is what gets multiple findings
-       out, each on a separate line (parse_severity_counts() splits on
-       newlines, so findings glued onto one line would otherwise be missed).
-
-    Severity labeling (CRITICAL vs WARNING for the same issue) is still
-    inconsistent run-to-run at this model size — that's a model capability
-    limit prompting doesn't fully fix, not a parsing bug.
-
-    Corrections: each finding must include a concrete fix on the same line
-    as its severity tag, via a "Correction: ..." clause. This has to live
-    on the same line as the tag because parse_severity_counts() splits on
-    newlines — a correction on its own line would be dropped, and worse,
-    a bare continuation line wouldn't start with a known prefix so it
-    would silently vanish from review_text's effective content instead of
-    erroring.
-    """
-    return (
-        "You are an expert automated code reviewer. Analyze the code snippet "
-        "for security vulnerabilities, bugs, and code smells. The input may "
-        "be a unified diff or a standalone snippet.\n\n"
-        "Check specifically for: injection vulnerabilities (SQL/command/etc.), "
-        "hardcoded secrets or credentials, missing error handling, "
-        "correctness bugs, and naming or style issues. Report EVERY issue "
-        "you find, each on its own line, not just the first one.\n\n"
-        "Strict Output Rules:\n"
-        "- Each finding is exactly one line, separated by a newline "
-        "character. Never merge multiple findings onto one line.\n"
-        "- Every line MUST start with exactly one prefix: CRITICAL:, "
-        "WARNING:, or NITPICK:.\n"
-        "- CRITICAL = security vulnerabilities (injection, hardcoded "
-        "secrets, auth bypass) or correctness bugs.\n"
-        "- WARNING = design or maintainability concerns that are not "
-        "security bugs (missing error handling, poor structure).\n"
-        "- NITPICK = pure style (naming, formatting, comments).\n"
-        "- For every issue found, you must identify the fault AND provide "
-        "a specific, actionable code correction on the same line, "
-        "introduced by \"Correction:\". Never put the correction on its "
-        "own line or a new line.\n"
-        "- Do not include conversational intro/outro, repeat the code, or "
-        "use markdown.\n\n"
-        "Example Output (format only, unrelated to the code below):\n"
-        "CRITICAL: Unsanitized input allows SQL Injection. Correction: Use "
-        "parameterized queries (e.g., cursor.execute(\"SELECT...\", (user_id,)))\n"
-        "WARNING: Hardcoded API secret exposed. Correction: Load this from "
-        "an environment variable using os.getenv('API_KEY').\n"
-        "NITPICK: Variable name 'x' is non-descriptive. Correction: Rename "
-        "'x' to a name that reflects its purpose, e.g. 'user_count'.\n\n"
-        "Analyze this code:\n"
-        f"{code_text}"
-    )
-
-
-def parse_severity_counts(review_text: str) -> dict:
-    """Simple line-prefix parser for CRITICAL/WARNING/NITPICK counts."""
-    counts = {"critical_count": 0, "warning_count": 0, "nitpick_count": 0}
-    for line in review_text.splitlines():
-        stripped = line.strip().upper()
-        if stripped.startswith("CRITICAL:") or stripped.startswith("CRITICAL "):
-            counts["critical_count"] += 1
-        elif stripped.startswith("WARNING:") or stripped.startswith("WARNING "):
-            counts["warning_count"] += 1
-        elif stripped.startswith("NITPICK:") or stripped.startswith("NITPICK "):
-            counts["nitpick_count"] += 1
-    return counts
-
-
 PROVIDER_ERROR_STATUS = {
     providers.UNREACHABLE: "llm_offline_pending",
     providers.TIMEOUT: "llm_timeout",
@@ -332,6 +288,7 @@ def _failed_result(status: str, error: str) -> dict:
         "critical_count": 0,
         "warning_count": 0,
         "nitpick_count": 0,
+        "findings": [],
         "status": status,
         "error": error,
     }
@@ -371,9 +328,15 @@ async def review_code_with_ollama(code_text: str) -> dict:
             response.num_ctx,
         )
 
+    parsed = parse_review(review_text)
+    if parsed.failures:
+        logger.info("Review output had %s unparseable line(s).", len(parsed.failures))
+
     return {
         "review_text": review_text,
-        **parse_severity_counts(review_text),
+        **parsed.counts(),
+        "findings": [finding.to_dict() for finding in parsed.findings],
+        "parse_status": parsed.status,
         "status": "reviewed",
         "error": None,
     }
@@ -620,7 +583,7 @@ async def github_webhook(
 @app.get("/api/reviews", response_model=list[ReviewOut], dependencies=[Depends(require_api_key)])
 def get_reviews(db: Session = Depends(get_db)):
     reviews = db.query(PRReview).order_by(PRReview.created_at.desc()).all()
-    return reviews
+    return [ReviewOut.from_row(review) for review in reviews]
 
 
 @app.post(
@@ -646,7 +609,7 @@ async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_
     db.add(new_review)
     db.commit()
     db.refresh(new_review)
-    return new_review
+    return ReviewOut.from_row(new_review)
 
 
 @app.post(

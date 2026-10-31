@@ -54,6 +54,7 @@ MIGRATION_COLUMNS = [
     ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
     ("last_error", "TEXT"),
     ("next_attempt_at", "DATETIME"),
+    ("findings_json", "TEXT"),
 ]
 
 
