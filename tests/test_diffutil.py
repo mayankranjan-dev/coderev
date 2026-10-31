@@ -197,4 +197,4 @@ def test_engine_stops_on_provider_error():
     stub = StubProvider(replies=[ProviderError("unreachable", "down")])
     result = asyncio.run(run_review(TWO_FILES, stub, lambda c: c, EngineConfig(chunking=D.PER_FILE)))
     assert len(stub.calls) == 1
-    assert result.provider_error.error_kind == "unreachable"
+    assert result.failure.kind == "unreachable"

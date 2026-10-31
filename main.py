@@ -50,11 +50,11 @@ import retry_queue
 from database import SessionLocal, get_db
 from models import PRReview
 from frontend_static import FrontendApp, frontend_dist_dir
-from reviewer import providers
+from reviewer import engine
 from reviewer.engine import EngineConfig, counts, run_review
 from reviewer.findings import Finding, parse_review
 from reviewer.prompts import build_review_prompt
-from reviewer.providers import OllamaProvider, ProviderError, ReviewProvider
+from reviewer.providers import OllamaProvider, ReviewProvider
 from security import cors_origins_from_env, rate_limit, require_api_key
 
 load_dotenv()
@@ -75,6 +75,8 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 # changed file. Either way input over the num_ctx budget is cut at a hunk
 # boundary and the cut is logged and stored (reviewer/diffutil.py).
 REVIEW_CHUNKING = os.getenv("REVIEW_CHUNKING", "whole")
+# Extra attempts when the model's output is blank or has no parseable line.
+REVIEW_MAX_RETRIES = int(os.getenv("REVIEW_MAX_RETRIES", "1"))
 
 # Judge0 Community Edition runs submitted code in an isolated worker with its
 # own CPU/memory/process limits. Execution is deliberately delegated to it
@@ -259,11 +261,15 @@ class SandboxError(RuntimeError):
     """
 
 
-PROVIDER_ERROR_STATUS = {
-    providers.UNREACHABLE: "llm_offline_pending",
-    providers.TIMEOUT: "llm_timeout",
-    providers.HTTP_ERROR: "llm_error",
-    providers.BAD_RESPONSE: "llm_error",
+# engine.Failure.kind -> stored status. The first three are retried later by
+# retry_queue.py. Malformed/empty output was already retried by the engine
+# (REVIEW_MAX_RETRIES), so those are final and keep the raw text for display.
+FAILURE_STATUS = {
+    engine.UNREACHABLE: "llm_offline_pending",
+    engine.TIMEOUT: "llm_timeout",
+    engine.PROVIDER_ERROR: "llm_error",
+    engine.MALFORMED_OUTPUT: "llm_malformed_output",
+    engine.EMPTY_OUTPUT: "llm_empty_output",
 }
 
 
@@ -284,13 +290,13 @@ def get_review_provider() -> ReviewProvider:
     )
 
 
-def _failed_result(status: str, error: str) -> dict:
+def _failed_result(status: str, error: str, review_text: Optional[str] = None) -> dict:
     """
-    status is one of retry_queue.RETRYABLE_STATUSES. `error` is stored in
-    last_error, so it names the failure class only, never URLs or hosts.
+    `error` is stored in last_error, so it names the failure class only,
+    never URLs or hosts.
     """
     return {
-        "review_text": None,
+        "review_text": review_text,
         "critical_count": 0,
         "warning_count": 0,
         "nitpick_count": 0,
@@ -306,29 +312,31 @@ async def review_code_with_ollama(code_text: str) -> dict:
 
     Returns:
         {"review_text": str | None, "critical_count": int, "warning_count": int,
-         "nitpick_count": int, "status": "reviewed" | "llm_offline_pending"
-         | "llm_timeout" | "llm_error", "error": str | None}
+         "nitpick_count": int, "findings": list, "truncated": bool,
+         "status": "reviewed" | one of FAILURE_STATUS values,
+         "error": str | None}
 
     Never raises. Ollama being offline is an expected, routine condition in
     production — not an error — so it's logged at INFO and reported through
-    status="llm_offline_pending" with zero counts. review_text stays None for
-    every failure status.
+    status="llm_offline_pending" with zero counts. review_text is None for
+    transport failures and holds the raw model text for output failures.
 
     Async (not a plain def) because it performs network I/O from async
     handlers; a blocking client here would stall the event loop.
     """
     provider = get_review_provider()
-    result = await run_review(
-        code_text, provider, build_review_prompt, EngineConfig(chunking=REVIEW_CHUNKING)
-    )
+    config = EngineConfig(chunking=REVIEW_CHUNKING, max_retries=REVIEW_MAX_RETRIES)
+    result = await run_review(code_text, provider, build_review_prompt, config)
 
-    failed = result.provider_error
-    if failed is not None:
-        status = PROVIDER_ERROR_STATUS.get(failed.error_kind, "llm_error")
+    failure = result.failure
+    if failure is not None:
+        status = FAILURE_STATUS.get(failure.kind, "llm_error")
         # Unreachable is routine (Ollama not started), so INFO; others WARNING.
-        log = logger.info if failed.error_kind == providers.UNREACHABLE else logger.warning
-        log("Ollama review failed (%s); marking review %s.", failed.error_detail, status)
-        return _failed_result(status, f"{failed.error_kind}: {failed.error_detail}")
+        log = logger.info if failure.kind == engine.UNREACHABLE else logger.warning
+        log("Review failed (%s) after %s retr(y/ies); marking %s.", failure, result.retries, status)
+        raw = result.raw_text if failure.kind not in engine.TRANSPORT_KINDS else ""
+        raw = raw if raw.strip() else None
+        return _failed_result(status, str(failure), raw) | {"truncated": result.truncated}
 
     if result.truncated:
         logger.warning("Review input was truncated to fit the context window: %s", result.plan.to_dict())
