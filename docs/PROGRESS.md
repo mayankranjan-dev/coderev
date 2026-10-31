@@ -55,4 +55,5 @@ Third task: CI verification, security, Docker, documentation. A row's own commit
 | D1 screenshot capture list | done | 7bc285f |
 | D2 README rewrite (RESULTS_STATE: NOT_YET) | done | 0e1a842 |
 | D3 architecture notes | done | 47b6d47 |
-| D4 decision prompts for author | done | pending |
+| D4 decision prompts for author | done | aa7c4a2 |
+| D5 results refresh steps | done | pending |
