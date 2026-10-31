@@ -4,8 +4,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 
 | Item | Status | Commit |
 |---|---|---|
-| A0 pytest scaffolding | done | (next commit) |
-| A1 API key on review/execute endpoints | todo | |
+| A0 pytest scaffolding | done | 94d2e2d |
+| A1 API key on review/execute endpoints | done | (next commit) |
 | A2 rate limiting and CORS | todo | |
 | A3 idempotent, non-blocking webhook | todo | |
 | A4 retry queue | todo | |

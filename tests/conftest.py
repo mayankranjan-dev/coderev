@@ -108,7 +108,16 @@ def judge0_stub(monkeypatch):
     return stub
 
 
+TEST_API_KEY = "test-key"
+
+
 @pytest.fixture
-def client(db_url, ollama_stub, judge0_stub):
+def auth():
+    return {"X-API-Key": TEST_API_KEY}
+
+
+@pytest.fixture
+def client(db_url, ollama_stub, judge0_stub, monkeypatch):
+    monkeypatch.setenv("CODEREV_API_KEY", TEST_API_KEY)
     with TestClient(main.app) as test_client:
         yield test_client

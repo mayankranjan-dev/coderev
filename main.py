@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 import database
 from database import SessionLocal, get_db
 from models import PRReview
+from security import require_api_key
 
 load_dotenv()
 
@@ -517,13 +518,13 @@ async def github_webhook(
     return {"status": "accepted"}
 
 
-@app.get("/api/reviews", response_model=list[ReviewOut])
+@app.get("/api/reviews", response_model=list[ReviewOut], dependencies=[Depends(require_api_key)])
 def get_reviews(db: Session = Depends(get_db)):
     reviews = db.query(PRReview).order_by(PRReview.created_at.desc()).all()
     return reviews
 
 
-@app.post("/api/reviews/manual", response_model=ReviewOut)
+@app.post("/api/reviews/manual", response_model=ReviewOut, dependencies=[Depends(require_api_key)])
 async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_db)):
     if not payload.code_snippet.strip():
         raise HTTPException(status_code=422, detail="code_snippet cannot be empty")
@@ -548,7 +549,7 @@ async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_
     return new_review
 
 
-@app.post("/api/execute", response_model=ExecuteOut)
+@app.post("/api/execute", response_model=ExecuteOut, dependencies=[Depends(require_api_key)])
 async def execute_code(payload: ExecuteRequest):
     """
     Run a Python snippet in the Judge0 sandbox and return its captured output.

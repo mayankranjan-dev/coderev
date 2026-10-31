@@ -35,6 +35,20 @@ const STATUS_LABELS = {
 // Must match repo_name set by POST /api/reviews/manual in main.py.
 const MANUAL_REPO_NAME = "Manual Submission";
 
+// The backend requires X-API-Key on review and execute endpoints. The key is
+// typed in by the user and kept in sessionStorage only (cleared when the tab
+// closes); it is never bundled into the build.
+const API_KEY_STORAGE = "coderev_api_key";
+
+function apiFetch(path, options = {}) {
+  const key = sessionStorage.getItem(API_KEY_STORAGE) || "";
+  const headers = { ...(options.headers || {}) };
+  if (key) headers["X-API-Key"] = key;
+  return fetch(path, { ...options, headers });
+}
+
+class AuthError extends Error {}
+
 function isManualReview(review) {
   return review.repo_name === MANUAL_REPO_NAME;
 }
@@ -423,6 +437,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [needsKey, setNeedsKey] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [mode, setMode] = useState("browse"); // "browse" | "manual"
   const [manualCode, setManualCode] = useState("");
@@ -442,8 +458,11 @@ export default function App() {
       setError(null);
 
       try {
-        const response = await fetch("/api/reviews", { signal: controller.signal });
+        const response = await apiFetch("/api/reviews", { signal: controller.signal });
 
+        if (response.status === 403) {
+          throw new AuthError("An API key is required to load reviews.");
+        }
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`);
         }
@@ -452,10 +471,12 @@ export default function App() {
         const rows = Array.isArray(data) ? data : [];
 
         setReviews(rows);
+        setNeedsKey(false);
         // Deliberately no auto-select here — landing the user on the latest
         // PR by default is what we're moving away from.
       } catch (err) {
         if (err.name === "AbortError") return;
+        setNeedsKey(err instanceof AuthError);
         setError(err.message || "Unable to load reviews.");
       } finally {
         // StrictMode aborts the first effect run; don't clear loading for it.
@@ -513,7 +534,7 @@ export default function App() {
     setTerminalError("");
 
     try {
-      const response = await fetch("/api/execute", {
+      const response = await apiFetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: manualCode }),
@@ -552,7 +573,7 @@ export default function App() {
     setSubmitError(null);
 
     try {
-      const response = await fetch("/api/reviews/manual", {
+      const response = await apiFetch("/api/reviews/manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code_snippet: manualCode }),
@@ -626,6 +647,37 @@ export default function App() {
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
             <p className="text-sm text-slate-500">{error}</p>
+            {needsKey ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sessionStorage.setItem(API_KEY_STORAGE, keyInput.trim());
+                  setKeyInput("");
+                  setReloadToken((token) => token + 1);
+                }}
+                className="flex gap-2"
+              >
+                <label htmlFor="api-key" className="sr-only">
+                  API key
+                </label>
+                <input
+                  id="api-key"
+                  type="password"
+                  autoComplete="off"
+                  value={keyInput}
+                  onChange={(event) => setKeyInput(event.target.value)}
+                  placeholder="API key"
+                  className="w-64 border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                />
+                <button
+                  type="submit"
+                  disabled={!keyInput.trim()}
+                  className="bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save key
+                </button>
+              </form>
+            ) : null}
             <button
               type="button"
               onClick={() => setReloadToken((token) => token + 1)}
