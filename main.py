@@ -50,6 +50,8 @@ import retry_queue
 from database import SessionLocal, get_db
 from models import PRReview
 from frontend_static import FrontendApp, frontend_dist_dir
+from reviewer import providers
+from reviewer.providers import OllamaProvider, ProviderError, ReviewProvider
 from security import cors_origins_from_env, rate_limit, require_api_key
 
 load_dotenv()
@@ -63,6 +65,9 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
 # Default 10s per the original spec. CPU-only machines can need longer for
 # generation even with the model loaded, so this is overridable via env.
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "10"))
+# Context window sent with every request. Always explicit: Ollama's default
+# depends on the version and model, and it truncates longer prompts silently.
+OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
 # Judge0 Community Edition runs submitted code in an isolated worker with its
 # own CPU/memory/process limits. Execution is deliberately delegated to it
@@ -292,6 +297,31 @@ def parse_severity_counts(review_text: str) -> dict:
     return counts
 
 
+PROVIDER_ERROR_STATUS = {
+    providers.UNREACHABLE: "llm_offline_pending",
+    providers.TIMEOUT: "llm_timeout",
+    providers.HTTP_ERROR: "llm_error",
+    providers.BAD_RESPONSE: "llm_error",
+}
+
+
+def get_review_provider() -> ReviewProvider:
+    """
+    The provider used by the production paths. Built per call from module
+    config (cheap: no connection is opened until generate()).
+    """
+    return OllamaProvider(
+        base_url=OLLAMA_BASE_URL,
+        model=OLLAMA_MODEL,
+        timeout_s=OLLAMA_TIMEOUT_SECONDS,
+        num_ctx=OLLAMA_NUM_CTX,
+        # Low temperature: at the default (~0.8) this small model's finding
+        # count and severity labels vary noticeably between identical
+        # requests. Determinism matters more here than creative phrasing.
+        temperature=0.2,
+    )
+
+
 def _failed_result(status: str, error: str) -> dict:
     """
     status is one of retry_queue.RETRYABLE_STATUSES. `error` is stored in
@@ -313,48 +343,33 @@ async def review_code_with_ollama(code_text: str) -> dict:
 
     Returns:
         {"review_text": str | None, "critical_count": int, "warning_count": int,
-         "nitpick_count": int, "status": "reviewed" | "llm_offline_pending"}
+         "nitpick_count": int, "status": "reviewed" | "llm_offline_pending"
+         | "llm_timeout" | "llm_error", "error": str | None}
 
     Never raises. Ollama being offline is an expected, routine condition in
     production — not an error — so it's logged at INFO and reported through
-    status="llm_offline_pending" with zero counts. review_text stays None in
-    that case so offline rows keep storing NULL, as they did before.
+    status="llm_offline_pending" with zero counts. review_text stays None for
+    every failure status.
 
     Async (not a plain def) because it performs network I/O from async
     handlers; a blocking client here would stall the event loop.
     """
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": build_review_prompt(code_text),
-        "stream": False,
-        # Low temperature: at the default (~0.8) this small model's finding
-        # count and severity labels vary noticeably between identical
-        # requests. Determinism matters more here than creative phrasing.
-        "options": {"temperature": 0.2},
-    }
-
+    provider = get_review_provider()
     try:
-        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
-            response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
-            response.raise_for_status()
-            review_text = response.json().get("response", "")
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        # Could not open a connection at all: Ollama is down or unreachable.
-        logger.info("Ollama is unreachable at %s; marking review llm_offline_pending.", OLLAMA_BASE_URL)
-        return _failed_result("llm_offline_pending", f"unreachable ({type(exc).__name__})")
-    except httpx.TimeoutException as exc:
-        # Connected, but the model did not answer in time. Kept apart from
-        # "offline" because the fix is different (raise the timeout).
-        logger.info("Ollama did not respond within %ss; marking review llm_timeout.", OLLAMA_TIMEOUT_SECONDS)
-        return _failed_result("llm_timeout", f"timed out after {OLLAMA_TIMEOUT_SECONDS:g}s ({type(exc).__name__})")
-    except httpx.HTTPStatusError as exc:
-        logger.warning("Ollama returned HTTP %s.", exc.response.status_code)
-        return _failed_result("llm_error", f"HTTP {exc.response.status_code}")
-    except (httpx.HTTPError, ValueError) as exc:
-        # Connection dropped mid-response, or a non-JSON body.
-        # Still degrade gracefully: the caller's contract is "never raise".
-        logger.warning("Ollama review failed: %s", exc)
-        return _failed_result("llm_error", type(exc).__name__)
+        response = await provider.generate(build_review_prompt(code_text))
+    except ProviderError as exc:
+        status = PROVIDER_ERROR_STATUS.get(exc.kind, "llm_error")
+        # Unreachable is routine (Ollama not started), so INFO; others WARNING.
+        log = logger.info if exc.kind == providers.UNREACHABLE else logger.warning
+        log("Ollama review failed (%s); marking review %s.", exc.detail, status)
+        return _failed_result(status, str(exc))
+
+    review_text = response.text
+    if response.truncation_suspected:
+        logger.warning(
+            "Prompt filled the %s-token context window; the diff was likely truncated.",
+            response.num_ctx,
+        )
 
     return {
         "review_text": review_text,
@@ -464,12 +479,7 @@ async def execute_code_with_judge0(code: str) -> dict:
 
 async def check_ollama_reachable() -> bool:
     """Real connectivity check against Ollama's /api/tags endpoint."""
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-            return response.status_code == 200
-    except httpx.HTTPError:
-        return False
+    return await get_review_provider().is_available()
 
 
 # ---------------------------------------------------------------------------

@@ -233,4 +233,5 @@ def test_ollama_failures_are_classified(monkeypatch, exc, status):
 def test_ollama_http_error_is_llm_error(monkeypatch):
     _patch_ollama_transport(monkeypatch, lambda request: httpx.Response(500))
     result = asyncio.run(main.review_code_with_ollama("x = 1"))
-    assert result == {**result, "status": "llm_error", "error": "HTTP 500"}
+    assert result["status"] == "llm_error"
+    assert "HTTP 500" in result["error"]
