@@ -51,3 +51,27 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: frontend
+
+  eval-gate:
+    # Regression gate for the eval HARNESS, not the real model. It runs the 6
+    # synthetic cases with the stub provider and the test-only matcher, then
+    # compares the metrics to eval/baseline.json. No Ollama, network or
+    # author-owned matcher is involved, so a pass says nothing about model
+    # quality. Regenerate the baseline with the command recorded in that file.
+    name: Synthetic eval regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Compare metrics to eval/baseline.json
+        run: python tests/eval_gate.py --check

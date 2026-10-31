@@ -44,8 +44,8 @@ def _diff(path, start):
     return f"--- a/{path}\n+++ b/{path}\n@@ -{start},2 +{start},2 @@\n x = 0\n-y = 1\n+y = 2\n"
 
 
-@pytest.fixture
-def workspace(tmp_path):
+def build_workspace(tmp_path):
+    """Write the 6 synthetic cases and a pre-filled diff cache under tmp_path."""
     entries = []
     for i, (cid, split, path, start, end) in enumerate(CASES):
         entry = {"id": cid, "repo_url": "https://github.com/example-org/synthetic",
@@ -65,6 +65,11 @@ def workspace(tmp_path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(fc.to_json()), encoding="utf-8")
     return {"cases": cases_path, "cache": cache, "results": tmp_path / "results"}
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    return build_workspace(tmp_path)
 
 
 def label_reply(prompt, seed, path_override=None, lines=None):

@@ -1,0 +1,64 @@
+{
+  "_comment": "Baseline for the synthetic eval regression gate. It covers the HARNESS (stub provider, 6 synthetic cases, test-only matcher), NOT the real model. Regenerate only when harness behavior is changed on purpose, and say why in the commit.",
+  "command": "python tests/eval_gate.py --update",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "tolerance": 0,
+  "cases": [
+    "syn-bug-1",
+    "syn-bug-2",
+    "syn-bug-3",
+    "syn-bug-4",
+    "syn-ctl-1",
+    "syn-ctl-2"
+  ],
+  "scenarios": {
+    "perfect": {
+      "recall": 1.0,
+      "recall_critical": 1.0,
+      "fp_rate_critical": 0.0,
+      "fp_rate_any": 0.0,
+      "unlocated_rate": 0.0,
+      "parse_failure_rate": 0.0,
+      "transport_failure_rate": 0.0,
+      "truncation_rate": 0.0,
+      "n_reviews": 6.0
+    },
+    "seed_dependent": {
+      "recall": 0.6666666666666666,
+      "recall_critical": 0.6666666666666666,
+      "fp_rate_critical": 0.0,
+      "fp_rate_any": 0.0,
+      "unlocated_rate": 0.0,
+      "parse_failure_rate": 0.0,
+      "transport_failure_rate": 0.0,
+      "truncation_rate": 0.0,
+      "n_reviews": 6.0
+    },
+    "flood_misses": {
+      "recall": 0.0,
+      "recall_critical": 0.0,
+      "fp_rate_critical": 1.0,
+      "fp_rate_any": 1.0,
+      "unlocated_rate": 0.0,
+      "parse_failure_rate": 0.0,
+      "transport_failure_rate": 0.0,
+      "truncation_rate": 0.0,
+      "n_reviews": 6.0
+    },
+    "unlocated": {
+      "recall": 0.0,
+      "recall_critical": 0.0,
+      "fp_rate_critical": 1.0,
+      "fp_rate_any": 1.0,
+      "unlocated_rate": 1.0,
+      "parse_failure_rate": 0.0,
+      "transport_failure_rate": 0.0,
+      "truncation_rate": 0.0,
+      "n_reviews": 6.0
+    }
+  }
+}
