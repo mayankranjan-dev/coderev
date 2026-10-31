@@ -49,4 +49,6 @@ Third task: CI verification, security, Docker, documentation. A row's own commit
 |---|---|---|
 | E0 gh auth and CI runs | done (authenticated; last 5 runs on v2-revamp all passed) | n/a |
 | E1 frontend vulnerabilities | done (vite 6.0.7 to 6.4.5; npm audit: 0 vulnerabilities) | 919e90f |
-| E2 Docker verified, loopback bind | done | pending |
+| E2 Docker verified, loopback bind | done | 06b4ab8 |
+| E3 CI loop | done (run 41202667616 on 06b4ab8 green on all 4 jobs; 0 fix iterations needed) | n/a |
+| E4 record verified CI run | done | pending |

@@ -40,7 +40,7 @@ Updated 2026-10-31 on branch `v2-revamp`. Commit hashes are from `git log --onel
 | P0-2 No file/line location | Resolved | `d9a8bb3` | |
 | P0-3 Silent truncation | Resolved | `751fd04`, `327d71d` | |
 | P0-4 Slow and offline share a status | Resolved | `76e3bae` | |
-| P0-5 No tests, no CI | Resolved, CI run not observed | `94d2e2d`, `3218e0d`, `15647a3` | The workflow (lint, tests on Python 3.11 and 3.12, frontend build, synthetic eval gate) exists and passes locally. No run on GitHub has been seen: the `gh` CLI is not authenticated here. |
+| P0-5 No tests, no CI | Resolved, CI verified | `94d2e2d`, `3218e0d`, `15647a3` | Verified with `gh run view 41202667616` on commit `06b4ab8`: all four jobs succeeded (Lint and test on Python 3.11 and 3.12, Frontend build, Synthetic eval regression gate). Run: https://github.com/mayankranjan-dev/coderev/actions/runs/41202667616. The eval gate checks the harness with a stub provider, not model quality. |
 | P1-1 No auth or rate limiting | Resolved | `67a2c70`, `b3f1695`, `d6f4c89`, `9308088` | |
 | P1-2 Webhook work inside the request | Resolved | `e54f41d` | |
 | P1-3 Duplicate rows on redelivery | Resolved | `e54f41d` | Dedupe is on (repo, PR number, head SHA), not on `X-GitHub-Delivery`. |
