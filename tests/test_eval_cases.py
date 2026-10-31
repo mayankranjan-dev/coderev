@@ -160,3 +160,16 @@ def test_top_level_must_be_mapping(tmp_path):
     path.write_text("- just\n- a list\n", encoding="utf-8")
     with pytest.raises(CaseFileError):
         load_cases(path)
+
+
+def test_example_file_loads_and_is_clearly_fake():
+    from pathlib import Path
+
+    example = Path(__file__).resolve().parent.parent / "eval" / "cases.example.yaml"
+    cs = load_cases(example)
+    assert len(cs.cases) == 3 and len(cs.bugs) == 2 and len(cs.controls) == 1
+    for case in cs.cases:
+        assert case.id.startswith("example-")
+        assert "example-org/example-repo" in case.repo_url
+        assert len(set(case.fix_sha)) == 1 and len(set(case.parent_sha)) == 1  # placeholder SHAs
+        assert case.notes and case.notes.startswith("FAKE")

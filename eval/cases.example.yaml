@@ -1,0 +1,40 @@
+# EXAMPLE ONLY. Every entry below is fake: the repository does not exist and
+# the SHAs are placeholders. Copy this file to eval/cases.yaml and replace the
+# entries with real, labeled cases (eval/LABELING.md). Never run the eval on
+# this file.
+version: 1
+
+# Optional. When present, every bug case's category must be in this list.
+# The real taxonomy is an owner decision (docs/eval/LABELING_RULES.md §6.1).
+categories: [logic, none-handling, exception-handling, type-or-api-misuse, state-mutation,
+             resource, concurrency, security, edge-input, other]
+
+cases:
+  - id: example-bug-1
+    repo_url: https://github.com/example-org/example-repo
+    parent_sha: "1111111111111111111111111111111111111111"
+    fix_sha: "2222222222222222222222222222222222222222"
+    split: bug
+    buggy_file: example_pkg/example_module.py
+    line_start: 40
+    line_end: 42
+    category: logic
+    notes: FAKE entry. Fix commit message and linked issue would be summarized here.
+
+  - id: example-bug-2
+    repo_url: https://github.com/example-org/example-repo
+    parent_sha: "3333333333333333333333333333333333333333"
+    fix_sha: "4444444444444444444444444444444444444444"
+    split: bug
+    buggy_file: example_pkg/other_module.py
+    line_start: 7
+    line_end: 7
+    category: none-handling
+    notes: FAKE entry. Single-line range.
+
+  - id: example-control-1
+    repo_url: https://github.com/example-org/example-repo
+    parent_sha: "5555555555555555555555555555555555555555"
+    fix_sha: "6666666666666666666666666666666666666666"
+    split: control
+    notes: FAKE entry. Controls carry no buggy_file, lines, or category.
