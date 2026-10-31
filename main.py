@@ -49,6 +49,7 @@ import database
 import retry_queue
 from database import SessionLocal, get_db
 from models import PRReview
+from frontend_static import FrontendApp, frontend_dist_dir
 from security import cors_origins_from_env, rate_limit, require_api_key
 
 load_dotenv()
@@ -675,3 +676,12 @@ async def execute_code(payload: ExecuteRequest):
 async def health():
     ollama_reachable = await check_ollama_reachable()
     return HealthOut(status="ok", ollama_reachable=ollama_reachable)
+
+
+# ---------------------------------------------------------------------------
+# Built frontend. Keep this LAST: a mount at "/" matches every path, so any
+# route registered after it would be shadowed.
+# ---------------------------------------------------------------------------
+
+frontend_app = FrontendApp(frontend_dist_dir())
+app.mount("/", frontend_app, name="frontend")

@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_SOURCES = ["main.py", "database.py", "security.py", "retry_queue.py", "simulate_pr.py"]
+APP_SOURCES = [
+    "main.py", "database.py", "security.py", "retry_queue.py", "simulate_pr.py", "frontend_static.py",
+]
 REVIEWER_DIR = ROOT / "reviewer"
 
 

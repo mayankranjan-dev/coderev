@@ -9,8 +9,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | A2 rate limiting and CORS | done | b3f1695 |
 | A3 idempotent, non-blocking webhook | done | e54f41d |
 | A4 retry queue | done | 76e3bae |
-| A5 dependency and config drift | done | (next commit) |
-| A6 serve built frontend | todo | |
+| A5 dependency and config drift | done | fd8014c |
+| A6 serve built frontend | done | (next commit) |
 | B1 review provider interface | todo | |
 | B2 structured findings and tolerant parser | todo | |
 | B3 diff line mapping and chunking | todo | |
