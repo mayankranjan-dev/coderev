@@ -21,8 +21,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | C2 diff fetcher with cache | done | 41e6d01 |
 | C3 run harness | done | 2ccae80 |
 | C4 author-owned matcher stub and xfail tests | done (stub only; body is author-owned) | bd22b3d |
-| C5 report generator | done | (next commit) |
-| C6 ablation matrix runner | todo | |
+| C5 report generator | done | a09528c |
+| C6 ablation matrix runner | done | (next commit) |
 | C7 harness tests with stub provider | todo | |
 | C8 labeling guide and author checklist | todo | |
 | F1 verification and audit update | todo | |

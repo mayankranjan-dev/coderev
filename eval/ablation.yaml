@@ -1,0 +1,28 @@
+# Ablation matrix (docs/EVAL_DESIGN.md §5.2): one factor at a time from the
+# baseline. Each variant may change exactly one factor; eval/ablation.py
+# rejects a variant that changes zero or several.
+#
+#   python -m eval.ablation --matrix eval/ablation.yaml
+#
+# Model levels that are not pulled in Ollama are skipped and reported as
+# skipped, never silently dropped.
+
+baseline: configs/baseline.yaml
+repeats: 3
+# Line tolerance for headline recall. Owner to confirm before the first real
+# run (the report also shows recall at 0, 3, 5 and 10).
+tolerance: 3
+
+variants:
+  - name: model-0.5b
+    set: {model: "qwen2.5-coder:0.5b"}
+  - name: model-3b
+    set: {model: "qwen2.5-coder:3b"}
+  - name: model-7b
+    set: {model: "qwen2.5-coder:7b"}
+  - name: prompt-v2
+    set: {prompt_version: v2}
+  - name: chunking-per-file
+    set: {chunking: per_file}
+  - name: retry-off
+    set: {retry: false}
