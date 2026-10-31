@@ -20,6 +20,8 @@ if str(ROOT) not in sys.path:
 # Import-time config must never pick up the developer's real .env values for
 # anything that would reach the network or the real database.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+# The retry worker is exercised directly through retry_queue.run_once().
+os.environ["RETRY_WORKER_ENABLED"] = "0"
 
 import database  # noqa: E402
 import main  # noqa: E402

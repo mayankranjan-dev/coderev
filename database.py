@@ -51,6 +51,9 @@ def configure(url: str = DATABASE_URL):
 # keeps every existing row and value.
 MIGRATION_COLUMNS = [
     ("head_sha", "VARCHAR"),
+    ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_error", "TEXT"),
+    ("next_attempt_at", "DATETIME"),
 ]
 
 

@@ -39,7 +39,15 @@ class PRReview(Base):
     warning_count = Column(Integer, default=0, nullable=False)
     nitpick_count = Column(Integer, default=0, nullable=False)
 
-    # "pending" | "reviewed" | "llm_offline_pending" | "diff_unavailable"
+    # "pending" | "reviewed" | "diff_unavailable"
+    # | "llm_offline_pending" (unreachable) | "llm_timeout" | "llm_error"
+    # | "llm_failed" (retry attempts exhausted). See retry_queue.py.
     status = Column(String, nullable=False, default="pending")
+
+    # Retry bookkeeping (retry_queue.py). attempt_count counts every review
+    # attempt, including the first one made when the row was created.
+    attempt_count = Column(Integer, default=0, nullable=False, server_default="0")
+    last_error = Column(Text, nullable=True)
+    next_attempt_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

@@ -1,4 +1,5 @@
-# Known Limitations — SQLite on Render free tier is ephemeral; no retry queue for offline reviews yet.
+# Known Limitations — SQLite on Render free tier is ephemeral, so the retry
+# queue (which lives in the same table) is lost on restart there.
 """
 CodeRev Bot — a FastAPI service that listens for GitHub pull_request webhooks,
 fetches the diff, sends it to a locally-running Ollama model for review, and
@@ -15,12 +16,17 @@ Design notes:
   that it only works for diffs GitHub is willing to serve anonymously (fine
   for public repos; private repos would need an Authorization header, which
   would be added here as a token from the environment).
-- Ollama is treated as an unreliable, optional dependency: any connection or
-  timeout failure is logged and results in a "llm_offline_pending" row rather
-  than a request failure. This is the core reliability requirement of the
-  service — a dead LLM must never crash the webhook handler or lose the PR.
+- Ollama is treated as an unreliable, optional dependency: an unreachable
+  server gives "llm_offline_pending", a slow one "llm_timeout", and an HTTP or
+  body error "llm_error", rather than a request failure. retry_queue.py
+  retries those rows with backoff. This is the core reliability requirement
+  of the service — a dead LLM must never crash the webhook handler or lose
+  the PR.
+- The webhook handler only verifies, dedupes, and inserts a pending row; the
+  diff fetch and review run as a background task after the response.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -40,6 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import database
+import retry_queue
 from database import SessionLocal, get_db
 from models import PRReview
 from security import cors_origins_from_env, rate_limit, require_api_key
@@ -83,7 +90,25 @@ async def lifespan(_app: FastAPI):
     # Tables are created at startup, not at import, so importing this module
     # (tests, scripts) never creates audit.db as a side effect.
     database.init_db()
-    yield
+
+    stop = asyncio.Event()
+    worker = None
+    if retry_queue.worker_enabled():
+        # Lambdas look the functions up at call time, so stubs patched onto
+        # this module (tests) are what the worker calls.
+        worker = asyncio.create_task(
+            retry_queue.worker_loop(
+                lambda code: review_code_with_ollama(code),
+                lambda: check_ollama_reachable(),
+                stop,
+            )
+        )
+    try:
+        yield
+    finally:
+        stop.set()
+        if worker is not None:
+            await worker
 
 
 app = FastAPI(title="CodeRev Bot", version="1.0.0", lifespan=lifespan)
@@ -267,13 +292,18 @@ def parse_severity_counts(review_text: str) -> dict:
     return counts
 
 
-def _offline_result() -> dict:
+def _failed_result(status: str, error: str) -> dict:
+    """
+    status is one of retry_queue.RETRYABLE_STATUSES. `error` is stored in
+    last_error, so it names the failure class only, never URLs or hosts.
+    """
     return {
         "review_text": None,
         "critical_count": 0,
         "warning_count": 0,
         "nitpick_count": 0,
-        "status": "llm_offline_pending",
+        "status": status,
+        "error": error,
     }
 
 
@@ -308,22 +338,30 @@ async def review_code_with_ollama(code_text: str) -> dict:
             response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
             response.raise_for_status()
             review_text = response.json().get("response", "")
-    except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        if isinstance(exc, httpx.TimeoutException):
-            logger.info(
-                "Ollama did not respond within %ss; marking review llm_offline_pending.",
-                OLLAMA_TIMEOUT_SECONDS,
-            )
-        else:
-            logger.info("Ollama is unreachable at %s; marking review llm_offline_pending.", OLLAMA_BASE_URL)
-        return _offline_result()
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        # Could not open a connection at all: Ollama is down or unreachable.
+        logger.info("Ollama is unreachable at %s; marking review llm_offline_pending.", OLLAMA_BASE_URL)
+        return _failed_result("llm_offline_pending", f"unreachable ({type(exc).__name__})")
+    except httpx.TimeoutException as exc:
+        # Connected, but the model did not answer in time. Kept apart from
+        # "offline" because the fix is different (raise the timeout).
+        logger.info("Ollama did not respond within %ss; marking review llm_timeout.", OLLAMA_TIMEOUT_SECONDS)
+        return _failed_result("llm_timeout", f"timed out after {OLLAMA_TIMEOUT_SECONDS:g}s ({type(exc).__name__})")
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Ollama returned HTTP %s.", exc.response.status_code)
+        return _failed_result("llm_error", f"HTTP {exc.response.status_code}")
     except (httpx.HTTPError, ValueError) as exc:
-        # Error status, connection dropped mid-response, or a non-JSON body.
+        # Connection dropped mid-response, or a non-JSON body.
         # Still degrade gracefully: the caller's contract is "never raise".
         logger.warning("Ollama review failed: %s", exc)
-        return _offline_result()
+        return _failed_result("llm_error", type(exc).__name__)
 
-    return {"review_text": review_text, **parse_severity_counts(review_text), "status": "reviewed"}
+    return {
+        "review_text": review_text,
+        **parse_severity_counts(review_text),
+        "status": "reviewed",
+        "error": None,
+    }
 
 
 def _combine_judge0_stderr(body: dict) -> str:
@@ -430,7 +468,7 @@ async def check_ollama_reachable() -> bool:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
             return response.status_code == 200
-    except (httpx.ConnectError, httpx.TimeoutException):
+    except httpx.HTTPError:
         return False
 
 
@@ -512,12 +550,7 @@ async def process_review_job(review_id: int, diff_url: str) -> None:
         db.commit()
 
         result = await review_code_with_ollama(diff_text)
-
-        review.review_text = result["review_text"]
-        review.critical_count = result["critical_count"]
-        review.warning_count = result["warning_count"]
-        review.nitpick_count = result["nitpick_count"]
-        review.status = result["status"]
+        retry_queue.apply_review_result(review, result)
         db.commit()
     except Exception:  # noqa: BLE001  (last-resort guard for a background task)
         logger.exception("Review job %s failed unexpectedly.", review_id)
@@ -597,12 +630,9 @@ async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_
         pr_title="N/A",
         pr_url="N/A",
         diff_text=payload.code_snippet,
-        review_text=result["review_text"],
-        critical_count=result["critical_count"],
-        warning_count=result["warning_count"],
-        nitpick_count=result["nitpick_count"],
-        status=result["status"],
+        attempt_count=0,
     )
+    retry_queue.apply_review_result(new_review, result)
     db.add(new_review)
     db.commit()
     db.refresh(new_review)

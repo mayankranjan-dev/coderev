@@ -7,8 +7,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | A0 pytest scaffolding | done | 94d2e2d |
 | A1 API key on review/execute endpoints | done | 67a2c70 |
 | A2 rate limiting and CORS | done | b3f1695 |
-| A3 idempotent, non-blocking webhook | done | (next commit) |
-| A4 retry queue | todo | |
+| A3 idempotent, non-blocking webhook | done | e54f41d |
+| A4 retry queue | done | (next commit) |
 | A5 dependency and config drift | todo | |
 | A6 serve built frontend | todo | |
 | B1 review provider interface | todo | |
