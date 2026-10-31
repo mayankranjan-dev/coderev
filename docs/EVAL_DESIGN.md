@@ -17,18 +17,23 @@ Precision on bug items is **not** a headline metric. A bug item is labeled with 
 
 Only metadata and the owner's labels are committed. Diffs and source files are fetched at runtime and never copied into the repo.
 
-Two JSON Lines files (paths are proposals until the harness exists):
+One YAML file, `eval/cases.yaml` (owner-written; the harness ships only `eval/cases.example.yaml`), holds about 50 bug-fix commits and about 30 non-bug commits, told apart by a `split` field. The full schema and the loader's checks are in `eval/cases.py`. One entry:
 
-- `eval/data/bugs.jsonl`: about 50 bug-fix commits.
-- `eval/data/controls.jsonl`: about 30 non-bug commits.
-
-One object per line:
-
-```json
-{"id": "<short stable id>", "repo_url": "https://github.com/<owner>/<repo>", "fix_sha": "<40-char sha>", "parent_sha": "<40-char sha>", "label": {"buggy_file": "<path at parent_sha>", "line_start": 0, "line_end": 0, "category": "<category>"}}
+```yaml
+- id: <short stable id>
+  repo_url: https://github.com/<owner>/<repo>
+  parent_sha: <40-char sha>
+  fix_sha: <40-char sha>
+  split: bug            # bug | control
+  buggy_file: <path at parent_sha>   # bug only
+  line_start: 0                      # bug only
+  line_end: 0                        # bug only
+  category: <category>               # bug only
 ```
 
-- For controls, `fix_sha` holds the control commit and `label` is `null`. (Field naming for controls is an owner decision; see `docs/eval/LABELING_RULES.md`.)
+This replaced the earlier proposal of two JSON Lines files (`eval/data/bugs.jsonl`, `eval/data/controls.jsonl`) at the owner's request. The content per item is the same; YAML adds comments and a `split` field instead of a second file.
+
+- For controls, `fix_sha` holds the control commit and the label fields are absent. (Field naming for controls is an owner decision; see `docs/eval/LABELING_RULES.md` §7.3.)
 - `line_start` and `line_end` are 1-based, inclusive, and refer to `buggy_file` **as it exists at `parent_sha`**, the buggy version.
 - The harness may derive other values at runtime (commit date, diff size, file list). Derived values go in run artifacts, not in the dataset files.
 - A bug can span more than one place. Whether a label may have multiple ranges is an owner decision in the labeling rules. The schema above shows the single-range form.
@@ -45,7 +50,7 @@ The harness rejects an item, and the run fails loudly rather than skipping it si
 
 ### 2.3 Fetching
 
-The harness uses the `git` CLI: `git fetch --depth=2 <repo_url> <fix_sha>` into a gitignored cache (`eval/.cache/`), then `git diff` and `git show`. This adds no Python dependency (see `docs/DECISIONS.md`). The cache directory must be added to `.gitignore` in the same commit that introduces the harness.
+The harness uses the `git` CLI: `git fetch --depth=2 <repo_url> <fix_sha>` into a gitignored cache (`eval/cache/`), then `git diff` and `git show`. This adds no Python dependency (see `docs/DECISIONS.md`). The cache directory must be added to `.gitignore` in the same commit that introduces the harness. Computed diffs are cached too, so reruns work offline.
 
 ### 2.4 What the reviewer sees
 
@@ -127,7 +132,7 @@ One factor at a time from the baseline. A full factorial is not run; the call co
 
 ### 5.4 Run procedure
 
-1. Freeze the dataset: commit `bugs.jsonl` and `controls.jsonl` **before** any model is run on them. Record the dataset's git blob hash in each run.
+1. Freeze the dataset: commit `eval/cases.yaml` **before** any model is run on it. Record the dataset's git blob hash in each run. `eval/cases.yaml` is label data and is owner-written, under the same rule as the `eval/data/*.jsonl` files named in the steering file.
 2. Pilot on at most 5 items to check the pipeline. Pilot results are discarded and never reported, and pilot items stay in the dataset.
 3. Run all configs. No label is changed after any model output has been seen. If a label turns out to be wrong, the fix is a new dataset version, and all configs are re-run on it.
 4. Generate the report from the stored artifacts only.
@@ -143,9 +148,9 @@ Each run writes `eval/results/<run_id>/`:
 
 Numbers in `README.md` or `docs/` must cite a `run_id` (project rule). Committing `outputs.jsonl` is recommended so results are auditable. Raw outputs may quote short snippets of public code, which the owner should keep in mind.
 
-### 5.6 Proposed entry points
+### 5.6 Entry points
 
-These are a sketch, not implemented: `python -m eval.run --config <file> --runs 3` and `python -m eval.report <run_id>...`. The harness uses the stdlib plus `httpx` only.
+`python -m eval.fetch`, `python -m eval.run --config <file> --repeats 3`, `python -m eval.report <run_id>...`, and `python -m eval.ablation`. Exact usage is in `docs/eval/AUTHOR_TODO.md`. The harness uses the stdlib, `httpx`, and PyYAML (for `eval/cases.yaml` and config files; dev-only, see `docs/DECISIONS.md`).
 
 ## 6. Threats to validity
 

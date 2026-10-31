@@ -46,6 +46,13 @@ Status values: **Accepted** (in use), **Proposed** (not adopted yet, needs owner
 | gitleaks (CLI binary) | Proposed | A real secret scanner for the pre-commit gate. It is a standalone binary, so it adds no Python dependency. | `detect-secrets` (a pip dependency); the regex fallback in the steering file (weak, but zero install). |
 | git CLI (for eval) | Proposed | The eval harness fetches fix and parent commits with `git fetch --depth` into a gitignored cache, so diffs are never copied into the repo. No new Python dependency. | GitHub REST API via `httpx` (subject to rate limits without a token); GitHub `.diff` URLs (no reverse diff, no file contents at the parent commit). |
 
+## Python dev/eval dependencies (`requirements-dev.txt`)
+
+| Package | Version | Status | Why | Alternatives considered |
+|---|---|---|---|---|
+| pytest | 9.2.0 | Accepted | See "Proposed tooling" below. | |
+| PyYAML | 6.0.3 | Accepted (dev/eval only) | The owner asked for the eval case file as `eval/cases.yaml`, and the ablation matrix and run configs are YAML too, so labels can carry comments. The stdlib has no YAML parser. PyYAML is already installed as part of `uvicorn[standard]`, so this pins an existing package rather than adding a new one. Only `yaml.safe_load` is used. Not imported by the production app. | JSON/JSON Lines (stdlib, but no comments, which the labeling notes need); TOML via stdlib `tomllib` (read-only and awkward for a list of records); a hand-written YAML subset parser (fragile). |
+
 ## Evaluation design decisions
 
 Recorded in full in `docs/EVAL_DESIGN.md`. Summary:
