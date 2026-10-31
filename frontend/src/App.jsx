@@ -1,7 +1,8 @@
 /**
  * CodeRev Bot — two-pane review workspace.
  *
- * Fetches GET /api/reviews once on mount but never auto-selects a row: the
+ * Fetches the newest page of GET /api/reviews on mount (older pages load on
+ * demand from the landing screen) but never auto-selects a row: the
  * app always opens on the zero-state landing screen, and a PR/manual review
  * only appears once the user explicitly picks one. The dropdown selection
  * filters the already-fetched array. Manual mode POSTs a snippet to
@@ -39,6 +40,15 @@ const STATUS_LABELS = {
   llm_empty_output: "No review — the model returned an empty response.",
   reviewed: null,
 };
+
+// Page size for GET /api/reviews. Must not exceed REVIEWS_MAX_LIMIT (200).
+const PAGE_SIZE = 50;
+
+// Total row count from the X-Total-Count header; falls back to what was loaded.
+function readTotal(response, fallback) {
+  const total = Number(response.headers.get("X-Total-Count"));
+  return Number.isFinite(total) && total >= fallback ? total : fallback;
+}
 
 // Must match repo_name set by POST /api/reviews/manual in main.py.
 const MANUAL_REPO_NAME = "Manual Submission";
@@ -404,7 +414,7 @@ function ManualEditor({
  * nothing selected — including the very first paint, since selectedId now
  * starts at null and is never auto-filled from the fetched list.
  */
-function Landing({ reviews, onSelectReview, onStartManual }) {
+function Landing({ reviews, hasMore, loadingMore, onLoadMore, onSelectReview, onStartManual }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 px-4 text-center">
       <div className="flex flex-col items-center gap-3">
@@ -448,6 +458,17 @@ function Landing({ reviews, onSelectReview, onStartManual }) {
         </button>
       </div>
 
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="text-sm text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loadingMore ? "Loading…" : "Load older reviews"}
+        </button>
+      ) : null}
+
       {reviews.length === 0 ? (
         <p className="text-xs text-slate-400">
           No pull request reviews yet — open or update a PR to trigger one automatically.
@@ -467,6 +488,9 @@ export default function App() {
   const [needsKey, setNeedsKey] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
+  // Rows on the server (X-Total-Count); reviews holds the pages loaded so far.
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [mode, setMode] = useState("browse"); // "browse" | "manual"
   const [manualCode, setManualCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -485,7 +509,9 @@ export default function App() {
       setError(null);
 
       try {
-        const response = await apiFetch("/api/reviews", { signal: controller.signal });
+        const response = await apiFetch(`/api/reviews?limit=${PAGE_SIZE}&offset=0`, {
+          signal: controller.signal,
+        });
 
         if (response.status === 403) {
           throw new AuthError("An API key is required to load reviews.");
@@ -498,6 +524,7 @@ export default function App() {
         const rows = Array.isArray(data) ? data : [];
 
         setReviews(rows);
+        setTotalReviews(readTotal(response, rows.length));
         setNeedsKey(false);
         // Deliberately no auto-select here — landing the user on the latest
         // PR by default is what we're moving away from.
@@ -539,6 +566,27 @@ export default function App() {
     setMode("browse");
     setSelectedId(null);
     setSubmitError(null);
+  }
+
+  // Appends the next page. Never touches selectedId or mode.
+  async function loadMore() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const response = await apiFetch(`/api/reviews?limit=${PAGE_SIZE}&offset=${reviews.length}`);
+      if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+      const data = await response.json();
+      const rows = Array.isArray(data) ? data : [];
+      setReviews((current) => {
+        const known = new Set(current.map((row) => row.id));
+        return [...current, ...rows.filter((row) => !known.has(row.id))];
+      });
+      setTotalReviews(readTotal(response, reviews.length + rows.length));
+    } catch (err) {
+      setError(err.message || "Unable to load more reviews.");
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   function selectReview(id) {
@@ -716,6 +764,9 @@ export default function App() {
         ) : showLanding ? (
           <Landing
             reviews={reviews}
+            hasMore={reviews.length < totalReviews}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
             onSelectReview={selectReview}
             onStartManual={startManualReview}
           />

@@ -38,7 +38,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -111,6 +111,10 @@ MAX_EXECUTE_CODE_CHARS = int(os.getenv("MAX_EXECUTE_CODE_CHARS", "50000"))
 # limit is dropped while streaming and the row gets status "diff_too_large".
 MAX_REVIEW_CODE_CHARS = int(os.getenv("MAX_REVIEW_CODE_CHARS", "100000"))
 MAX_DIFF_BYTES = int(os.getenv("MAX_DIFF_BYTES", "2000000"))
+# GET /api/reviews page size. A request without a limit gets the default; a
+# limit above the maximum is rejected with 422.
+REVIEWS_DEFAULT_LIMIT = int(os.getenv("REVIEWS_DEFAULT_LIMIT", "50"))
+REVIEWS_MAX_LIMIT = int(os.getenv("REVIEWS_MAX_LIMIT", "200"))
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -150,6 +154,7 @@ app.add_middleware(
     allow_origins=cors_origins_from_env(),
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-API-Key"],
+    expose_headers=["X-Total-Count"],
 )
 
 # Rate limit runs before the API key check so key-guessing is throttled too.
@@ -632,8 +637,27 @@ async def github_webhook(
 
 
 @app.get("/api/reviews", response_model=list[ReviewOut], dependencies=[Depends(require_api_key)])
-def get_reviews(db: Session = Depends(get_db)):
-    reviews = db.query(PRReview).order_by(PRReview.created_at.desc()).all()
+def get_reviews(
+    response: Response,
+    limit: Optional[int] = Query(default=None, ge=1, le=REVIEWS_MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """
+    Newest first. The body stays a plain list; the total row count is in the
+    X-Total-Count header so a client can tell whether more pages exist.
+    """
+    if limit is None:
+        limit = REVIEWS_DEFAULT_LIMIT
+    # id breaks ties so pages never repeat or skip rows with equal timestamps.
+    reviews = (
+        db.query(PRReview)
+        .order_by(PRReview.created_at.desc(), PRReview.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    response.headers["X-Total-Count"] = str(db.query(PRReview).count())
     return [ReviewOut.from_row(review) for review in reviews]
 
 
