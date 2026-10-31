@@ -55,6 +55,7 @@ MIGRATION_COLUMNS = [
     ("last_error", "TEXT"),
     ("next_attempt_at", "DATETIME"),
     ("findings_json", "TEXT"),
+    ("truncated", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 

@@ -73,6 +73,7 @@ def apply_review_result(review: PRReview, result: dict, now: Optional[datetime] 
     review.nitpick_count = result.get("nitpick_count", 0)
     findings = result.get("findings")
     review.findings_json = json.dumps(findings) if findings is not None else None
+    review.truncated = bool(result.get("truncated", False))
 
     status = result.get("status", "llm_error")
     if status in RETRYABLE_STATUSES:

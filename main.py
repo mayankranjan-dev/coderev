@@ -51,6 +51,7 @@ from database import SessionLocal, get_db
 from models import PRReview
 from frontend_static import FrontendApp, frontend_dist_dir
 from reviewer import providers
+from reviewer.engine import EngineConfig, counts, run_review
 from reviewer.findings import Finding, parse_review
 from reviewer.prompts import build_review_prompt
 from reviewer.providers import OllamaProvider, ProviderError, ReviewProvider
@@ -70,6 +71,10 @@ OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "10"))
 # Context window sent with every request. Always explicit: Ollama's default
 # depends on the version and model, and it truncates longer prompts silently.
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+# "whole" sends the diff in one request; "per_file" sends one request per
+# changed file. Either way input over the num_ctx budget is cut at a hunk
+# boundary and the cut is logged and stored (reviewer/diffutil.py).
+REVIEW_CHUNKING = os.getenv("REVIEW_CHUNKING", "whole")
 
 # Judge0 Community Edition runs submitted code in an isolated worker with its
 # own CPU/memory/process limits. Execution is deliberately delegated to it
@@ -179,6 +184,7 @@ class ReviewOut(BaseModel):
     nitpick_count: int
     status: str
     created_at: datetime
+    truncated: bool = False
     findings: list[FindingOut] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -312,31 +318,28 @@ async def review_code_with_ollama(code_text: str) -> dict:
     handlers; a blocking client here would stall the event loop.
     """
     provider = get_review_provider()
-    try:
-        response = await provider.generate(build_review_prompt(code_text))
-    except ProviderError as exc:
-        status = PROVIDER_ERROR_STATUS.get(exc.kind, "llm_error")
+    result = await run_review(
+        code_text, provider, build_review_prompt, EngineConfig(chunking=REVIEW_CHUNKING)
+    )
+
+    failed = result.provider_error
+    if failed is not None:
+        status = PROVIDER_ERROR_STATUS.get(failed.error_kind, "llm_error")
         # Unreachable is routine (Ollama not started), so INFO; others WARNING.
-        log = logger.info if exc.kind == providers.UNREACHABLE else logger.warning
-        log("Ollama review failed (%s); marking review %s.", exc.detail, status)
-        return _failed_result(status, str(exc))
+        log = logger.info if failed.error_kind == providers.UNREACHABLE else logger.warning
+        log("Ollama review failed (%s); marking review %s.", failed.error_detail, status)
+        return _failed_result(status, f"{failed.error_kind}: {failed.error_detail}")
 
-    review_text = response.text
-    if response.truncation_suspected:
-        logger.warning(
-            "Prompt filled the %s-token context window; the diff was likely truncated.",
-            response.num_ctx,
-        )
-
-    parsed = parse_review(review_text)
-    if parsed.failures:
-        logger.info("Review output had %s unparseable line(s).", len(parsed.failures))
+    if result.truncated:
+        logger.warning("Review input was truncated to fit the context window: %s", result.plan.to_dict())
+    if result.parse_failures:
+        logger.info("Review output had %s unparseable line(s).", len(result.parse_failures))
 
     return {
-        "review_text": review_text,
-        **parsed.counts(),
-        "findings": [finding.to_dict() for finding in parsed.findings],
-        "parse_status": parsed.status,
+        "review_text": result.raw_text,
+        **counts(result.findings),
+        "findings": [finding.to_dict() for finding in result.findings],
+        "truncated": result.truncated,
         "status": "reviewed",
         "error": None,
     }

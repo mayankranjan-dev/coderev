@@ -7,7 +7,7 @@ database.MIGRATION_COLUMNS so existing databases are upgraded in place.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text
 
 from database import Base
 
@@ -37,6 +37,9 @@ class PRReview(Base):
     # JSON list of reviewer.findings.Finding dicts. NULL for rows reviewed
     # before structured findings existed; the API re-parses review_text then.
     findings_json = Column(Text, nullable=True)
+    # True when the input was cut to fit the model's context window, so the
+    # review only covers part of the diff.
+    truncated = Column(Boolean, default=False, nullable=False, server_default="0")
 
     critical_count = Column(Integer, default=0, nullable=False)
     warning_count = Column(Integer, default=0, nullable=False)
