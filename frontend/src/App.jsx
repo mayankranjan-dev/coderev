@@ -30,6 +30,7 @@ const STATUS_LABELS = {
   llm_offline_pending:
     "Review pending — the local model was unreachable when this code was submitted.",
   diff_unavailable: "No review — the pull request diff could not be fetched from GitHub.",
+  diff_too_large: "No review — the pull request diff is larger than the configured size limit.",
   llm_timeout: "Review pending — the local model timed out. It will be retried automatically.",
   llm_error: "Review pending — the local model returned an error. It will be retried automatically.",
   llm_failed: "No review — every retry attempt failed.",

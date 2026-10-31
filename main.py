@@ -106,6 +106,11 @@ JUDGE0_TIMEOUT_SECONDS = float(os.getenv("JUDGE0_TIMEOUT_SECONDS", "30"))
 JUDGE0_STATUS_ACCEPTED = 3
 # Guards against shipping a multi-megabyte paste to a shared free service.
 MAX_EXECUTE_CODE_CHARS = int(os.getenv("MAX_EXECUTE_CODE_CHARS", "50000"))
+# Upper bounds on what one request can hand the model. A manual submission
+# over the character limit is rejected with 413. A fetched diff over the byte
+# limit is dropped while streaming and the row gets status "diff_too_large".
+MAX_REVIEW_CODE_CHARS = int(os.getenv("MAX_REVIEW_CODE_CHARS", "100000"))
+MAX_DIFF_BYTES = int(os.getenv("MAX_DIFF_BYTES", "2000000"))
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -470,13 +475,31 @@ async def check_ollama_reachable() -> bool:
 # GitHub payload extraction / diff fetching
 # ---------------------------------------------------------------------------
 
+class DiffTooLarge(Exception):
+    """The diff response is larger than MAX_DIFF_BYTES. Not retryable."""
+
+
 async def fetch_diff_text(diff_url: str) -> Optional[str]:
-    """Fetch the unified diff text from GitHub's diff_url."""
+    """
+    Fetch the unified diff text from GitHub's diff_url.
+
+    Returns None on a transport or status failure. Raises DiffTooLarge when
+    the body exceeds MAX_DIFF_BYTES; the body is streamed and abandoned at the
+    limit, so an oversized response is never held in memory.
+    """
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.get(diff_url)
-            response.raise_for_status()
-            return response.text
+            async with client.stream("GET", diff_url) as response:
+                response.raise_for_status()
+                declared = response.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > MAX_DIFF_BYTES:
+                    raise DiffTooLarge(f"diff is {declared} bytes, limit {MAX_DIFF_BYTES}")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_DIFF_BYTES:
+                        raise DiffTooLarge(f"diff exceeds the {MAX_DIFF_BYTES} byte limit")
+                return bytes(body).decode(response.encoding or "utf-8", errors="replace")
     except httpx.HTTPError as exc:
         # Any transport or status failure (including ReadError and
         # RemoteProtocolError) degrades to "no diff" instead of escaping.
@@ -532,7 +555,14 @@ async def process_review_job(review_id: int, diff_url: str) -> None:
         if review is None:
             return
 
-        diff_text = await fetch_diff_text(diff_url) if diff_url else None
+        try:
+            diff_text = await fetch_diff_text(diff_url) if diff_url else None
+        except DiffTooLarge as exc:
+            logger.warning("Diff for PR #%s in %s is too large: %s", review.pr_number, review.repo_name, exc)
+            review.status = "diff_too_large"
+            review.last_error = f"Diff exceeds the {MAX_DIFF_BYTES} byte limit."
+            db.commit()
+            return
         review.diff_text = diff_text
         if not diff_text:
             logger.warning(
@@ -615,6 +645,11 @@ def get_reviews(db: Session = Depends(get_db)):
 async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_db)):
     if not payload.code_snippet.strip():
         raise HTTPException(status_code=422, detail="code_snippet cannot be empty")
+    if len(payload.code_snippet) > MAX_REVIEW_CODE_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"code_snippet exceeds the {MAX_REVIEW_CODE_CHARS} character review limit",
+        )
 
     result = await review_code_with_ollama(payload.code_snippet)
 
