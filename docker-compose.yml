@@ -1,0 +1,32 @@
+# Run with:  docker compose up --build
+# Settings come from your shell environment (or from a .env file next to this
+# file, which Compose reads for ${...} substitution). Nothing is baked into the
+# image. See docs/DEPLOY.md for the full variable list.
+services:
+  coderev:
+    build: .
+    image: coderev-bot:local
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      CODEREV_API_KEY: ${CODEREV_API_KEY:-}
+      # Ollama runs on the host, not in this container. host.docker.internal
+      # resolves to the host (see extra_hosts for Linux).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:1.5b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-10}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
+      JUDGE0_API_URL: ${JUDGE0_API_URL:-https://ce.judge0.com/submissions?base64_encoded=false&wait=true}
+      RATE_LIMIT_EXECUTE_PER_MINUTE: ${RATE_LIMIT_EXECUTE_PER_MINUTE:-10}
+      RATE_LIMIT_REVIEW_PER_MINUTE: ${RATE_LIMIT_REVIEW_PER_MINUTE:-5}
+      # The database lives on the named volume below.
+      DATABASE_URL: sqlite:////data/audit.db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - coderev-data:/data
+    restart: unless-stopped
+
+volumes:
+  coderev-data:

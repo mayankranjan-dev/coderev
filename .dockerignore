@@ -1,0 +1,24 @@
+# Keep secrets, local state and bulky or irrelevant files out of the build context.
+.env
+.env.*
+!.env.example
+*.db
+*.db.bak-*
+*.pem
+*.key
+.git
+.githooks
+.github
+.kiro
+.venv
+venv
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/dist
+eval
+tests
+docs
+assets
+PROJECT_CONTEXT.md
