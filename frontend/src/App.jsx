@@ -29,6 +29,7 @@ const STATUS_LABELS = {
   pending: "Pending — diff recorded, review not yet generated.",
   llm_offline_pending:
     "Review pending — the local model was unreachable when this code was submitted.",
+  diff_unavailable: "No review — the pull request diff could not be fetched from GitHub.",
   reviewed: null,
 };
 

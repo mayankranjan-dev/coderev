@@ -23,6 +23,7 @@ Design notes:
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -31,10 +32,11 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import database
@@ -443,48 +445,71 @@ async def fetch_diff_text(diff_url: str) -> Optional[str]:
             response = await client.get(diff_url)
             response.raise_for_status()
             return response.text
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+    except httpx.HTTPError as exc:
+        # Any transport or status failure (including ReadError and
+        # RemoteProtocolError) degrades to "no diff" instead of escaping.
         logger.warning("Failed to fetch diff from %s: %s", diff_url, exc)
         return None
 
 
-async def process_pull_request_event(payload: dict) -> None:
+def create_pending_review(payload: dict) -> Optional[int]:
     """
-    Handle an opened/synchronize pull_request event: persist a pending row
-    immediately, then attempt an Ollama review and update the row in place.
-    """
-    pull_request = payload.get("pull_request", {})
-    repository = payload.get("repository", {})
+    Insert the pending row for a pull_request event and return its id.
 
-    repo_name = repository.get("full_name", "unknown/unknown")
-    pr_number = pull_request.get("number", payload.get("number", 0))
-    pr_title = pull_request.get("title", "")
-    pr_url = pull_request.get("html_url", "")
-    diff_url = pull_request.get("diff_url", "")
+    Returns None when a row for the same (repo, PR number, head SHA) already
+    exists. The unique index on those columns is what enforces this, so two
+    concurrent redeliveries cannot both insert.
+    """
+    pull_request = payload.get("pull_request") or {}
+    repository = payload.get("repository") or {}
 
     db: Session = SessionLocal()
     try:
         review = PRReview(
-            repo_name=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            pr_url=pr_url,
+            repo_name=repository.get("full_name", "unknown/unknown"),
+            pr_number=pull_request.get("number", payload.get("number", 0)),
+            pr_title=pull_request.get("title", ""),
+            pr_url=pull_request.get("html_url", ""),
+            head_sha=(pull_request.get("head") or {}).get("sha"),
             diff_text=None,
             review_text=None,
             status="pending",
         )
         db.add(review)
-        db.commit()
-        db.refresh(review)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return None
+        return review.id
+    finally:
+        db.close()
+
+
+async def process_review_job(review_id: int, diff_url: str) -> None:
+    """
+    Background half of the webhook: fetch the diff and run the review, then
+    update the row. Runs after the HTTP response has been sent, so a slow diff
+    fetch or model call never pushes the webhook past GitHub's timeout.
+    Never raises: a background exception would only be logged by Starlette and
+    leave the row stuck in "pending".
+    """
+    db: Session = SessionLocal()
+    try:
+        review = db.get(PRReview, review_id)
+        if review is None:
+            return
 
         diff_text = await fetch_diff_text(diff_url) if diff_url else None
         review.diff_text = diff_text
-        db.commit()
-
         if not diff_text:
-            logger.warning("No diff text available for PR #%s in %s; leaving as pending.", pr_number, repo_name)
+            logger.warning(
+                "No diff text available for PR #%s in %s.", review.pr_number, review.repo_name
+            )
+            review.status = "diff_unavailable"
             db.commit()
             return
+        db.commit()
 
         result = await review_code_with_ollama(diff_text)
 
@@ -494,6 +519,9 @@ async def process_pull_request_event(payload: dict) -> None:
         review.nitpick_count = result["nitpick_count"]
         review.status = result["status"]
         db.commit()
+    except Exception:  # noqa: BLE001  (last-resort guard for a background task)
+        logger.exception("Review job %s failed unexpectedly.", review_id)
+        db.rollback()
     finally:
         db.close()
 
@@ -505,6 +533,7 @@ async def process_pull_request_event(payload: dict) -> None:
 @app.post("/api/webhook/github")
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: Optional[str] = Header(default=None, alias="X-Hub-Signature-256"),
     x_github_event: Optional[str] = Header(default=None, alias="X-GitHub-Event"),
 ):
@@ -518,7 +547,12 @@ async def github_webhook(
     if not verify_github_signature(raw_body, x_hub_signature_256):
         return JSONResponse(status_code=401, content={"detail": "Invalid signature"})
 
-    payload = await request.json()
+    try:
+        payload = json.loads(raw_body)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"detail": "Body is not valid JSON"})
+    if not isinstance(payload, dict):
+        return JSONResponse(status_code=400, content={"detail": "Body must be a JSON object"})
 
     if x_github_event != "pull_request":
         return {"status": "ignored", "reason": "not a pull_request event"}
@@ -527,9 +561,17 @@ async def github_webhook(
     if action not in ("opened", "synchronize"):
         return {"status": "ignored", "reason": f"action '{action}' not handled"}
 
-    await process_pull_request_event(payload)
+    pull_request = payload.get("pull_request") or {}
+    if not (pull_request.get("head") or {}).get("sha"):
+        return JSONResponse(status_code=400, content={"detail": "pull_request.head.sha is missing"})
 
-    return {"status": "accepted"}
+    review_id = create_pending_review(payload)
+    if review_id is None:
+        # Redelivery of an event already recorded for this head commit.
+        return {"status": "duplicate"}
+
+    background_tasks.add_task(process_review_job, review_id, pull_request.get("diff_url", ""))
+    return JSONResponse(status_code=202, content={"status": "accepted", "review_id": review_id})
 
 
 @app.get("/api/reviews", response_model=list[ReviewOut], dependencies=[Depends(require_api_key)])

@@ -10,6 +10,7 @@ venv/
 # Database
 audit.db
 *.db
+*.db.bak-*
 
 # Node / frontend
 frontend/node_modules/

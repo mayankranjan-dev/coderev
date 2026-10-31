@@ -117,6 +117,32 @@ def judge0_stub(monkeypatch):
     return stub
 
 
+class DiffStub:
+    def __init__(self):
+        self.calls = []
+        self.text = "diff --git a/x.py b/x.py\n+x = 1\n"
+
+    async def fetch(self, diff_url):
+        self.calls.append(diff_url)
+        return self.text
+
+
+@pytest.fixture
+def diff_stub(monkeypatch):
+    stub = DiffStub()
+    monkeypatch.setattr(main, "fetch_diff_text", stub.fetch)
+    return stub
+
+
+TEST_WEBHOOK_SECRET = "test-webhook-secret"
+
+
+@pytest.fixture
+def webhook_secret(monkeypatch):
+    monkeypatch.setattr(main, "WEBHOOK_SECRET", TEST_WEBHOOK_SECRET)
+    return TEST_WEBHOOK_SECRET
+
+
 TEST_API_KEY = "test-key"
 
 
@@ -126,7 +152,7 @@ def auth():
 
 
 @pytest.fixture
-def client(db_url, ollama_stub, judge0_stub, monkeypatch):
+def client(db_url, ollama_stub, judge0_stub, diff_stub, webhook_secret, monkeypatch):
     monkeypatch.setenv("CODEREV_API_KEY", TEST_API_KEY)
     with TestClient(main.app) as test_client:
         yield test_client

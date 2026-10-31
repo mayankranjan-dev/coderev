@@ -1,16 +1,28 @@
 """
 SQLAlchemy models for CodeRev Bot.
+
+Columns added after the first release must also be listed in
+database.MIGRATION_COLUMNS so existing databases are upgraded in place.
 """
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 
 from database import Base
+
+# Unique per (repo, PR, head commit): a GitHub redelivery of the same event
+# maps to the same key and is rejected by the database. Manual reviews and
+# rows created before head_sha existed have head_sha NULL, and SQLite treats
+# NULLs as distinct, so they never collide.
+DEDUPE_INDEX_NAME = "uq_pr_reviews_repo_pr_sha"
 
 
 class PRReview(Base):
     __tablename__ = "pr_reviews"
+    __table_args__ = (
+        Index(DEDUPE_INDEX_NAME, "repo_name", "pr_number", "head_sha", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -18,6 +30,7 @@ class PRReview(Base):
     pr_number = Column(Integer, nullable=False)
     pr_title = Column(String, nullable=False)
     pr_url = Column(String, nullable=False)
+    head_sha = Column(String, nullable=True)
 
     diff_text = Column(Text, nullable=True)
     review_text = Column(Text, nullable=True)
@@ -26,7 +39,7 @@ class PRReview(Base):
     warning_count = Column(Integer, default=0, nullable=False)
     nitpick_count = Column(Integer, default=0, nullable=False)
 
-    # "pending" | "reviewed" | "llm_offline_pending"
+    # "pending" | "reviewed" | "llm_offline_pending" | "diff_unavailable"
     status = Column(String, nullable=False, default="pending")
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
