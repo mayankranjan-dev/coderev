@@ -14,11 +14,21 @@ These rules apply to every prompt in this workspace. If a request conflicts with
 - Commit after each logical unit of work. Keep commits small and use conventional commit prefixes: `feat:`, `fix:`, `test:`, `docs:`, `ci:`, `refactor:`.
 - Use real timestamps only. Never set `GIT_AUTHOR_DATE` or `GIT_COMMITTER_DATE`, and never pass `--date`.
 - Never use `--force`, `--amend` on a pushed commit, `rebase`, or `filter-branch`. Never rewrite history.
-- Never `git push`. The owner pushes.
+- Pushing follows the GIT PUSH policy below. No other push command is allowed.
 - Stage files by explicit path. Never use `git add -A` or `git add .`.
 - Never modify git config. Never create, switch, or delete branches without being asked. Commit on the current branch.
 - Do not commit untracked files you did not create in the current task (for example `PROJECT_CONTEXT.md`, `assets/`) unless asked.
 - When finishing a task that included commits, show `git log --oneline` for the new commits.
+
+### GIT PUSH policy
+
+- After each commit that passes the gate, run `git push origin v2-revamp`. This is the only push command allowed.
+- NEVER push to main or master. NEVER use `--force`, `--force-with-lease`, `--delete`, or `--no-verify`. NEVER change `core.hooksPath` or edit anything in `.githooks`.
+- If a push is rejected or the hook blocks it, STOP, report the exact error, and do not work around it.
+- Before the first push of each task, run `git log origin/v2-revamp..HEAD --oneline` and `git status` so the commits are visible.
+- If the GitHub CLI is installed, after each push check `gh run list --branch v2-revamp --limit 1`; if the latest CI run failed, STOP and fix it before starting the next task. If `gh` is not installed, skip this and say so once.
+- Merging to main stays manual: the owner opens and merges the pull request.
+- Work autonomously between commits; do not ask for confirmation. Stop only on a failed gate, a blocked push, or a red CI run.
 
 ## 3. Pre-commit gate
 
