@@ -25,5 +25,5 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | C6 ablation matrix runner | done | 1decdb1 |
 | C7 harness tests with stub provider | done | ffcb629 |
 | C8 labeling guide and author checklist | done | 8a458ab |
-| F1 verification and audit update | done | (next commit) |
-| F2 final report | todo | |
+| F1 verification and audit update | done | f14f4f9 |
+| F2 final report | done (report in chat; this row is uncommitted) | |
