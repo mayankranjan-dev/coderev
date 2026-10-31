@@ -17,8 +17,8 @@ Hardening, reviewer engine, and eval harness task. Resume rule: read this file a
 | B4 typed failure handling with bounded retry | done | c732373 |
 | B5 versioned prompts, placeholder-only | done | df0fa5a |
 | B6 frontend adapted to structured findings | done | 69ef48e |
-| C1 case schema and loader | done | (next commit) |
-| C2 diff fetcher with cache | todo | |
+| C1 case schema and loader | done | 5c91167 |
+| C2 diff fetcher with cache | done | (next commit) |
 | C3 run harness | todo | |
 | C4 author-owned matcher stub and xfail tests | todo | |
 | C5 report generator | todo | |

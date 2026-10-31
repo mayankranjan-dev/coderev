@@ -18,6 +18,8 @@ frontend/dist/
 
 # Editor
 .vscode/
+# Eval: fetched third-party repos and diffs (never committed)
+eval/cache/
 # Local-only files
 PROJECT_CONTEXT.md
 assets/
