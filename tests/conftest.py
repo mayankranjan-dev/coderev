@@ -40,6 +40,15 @@ def _block_network(monkeypatch):
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", _blocked)
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    import security
+
+    security.limiter.reset()
+    yield
+    security.limiter.reset()
+
+
 @pytest.fixture
 def db_url(tmp_path):
     url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"

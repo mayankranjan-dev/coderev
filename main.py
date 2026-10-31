@@ -32,6 +32,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -39,7 +40,7 @@ from sqlalchemy.orm import Session
 import database
 from database import SessionLocal, get_db
 from models import PRReview
-from security import require_api_key
+from security import cors_origins_from_env, rate_limit, require_api_key
 
 load_dotenv()
 
@@ -84,6 +85,19 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="CodeRev Bot", version="1.0.0", lifespan=lifespan)
+
+# Same-origin requests (the built frontend, or the Vite proxy in dev) need no
+# CORS at all. This only admits the listed cross-origin callers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins_from_env(),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
+)
+
+# Rate limit runs before the API key check so key-guessing is throttled too.
+execute_rate_limit = rate_limit("execute", "RATE_LIMIT_EXECUTE_PER_MINUTE", 10)
+manual_review_rate_limit = rate_limit("manual_review", "RATE_LIMIT_REVIEW_PER_MINUTE", 5)
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +538,11 @@ def get_reviews(db: Session = Depends(get_db)):
     return reviews
 
 
-@app.post("/api/reviews/manual", response_model=ReviewOut, dependencies=[Depends(require_api_key)])
+@app.post(
+    "/api/reviews/manual",
+    response_model=ReviewOut,
+    dependencies=[Depends(manual_review_rate_limit), Depends(require_api_key)],
+)
 async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_db)):
     if not payload.code_snippet.strip():
         raise HTTPException(status_code=422, detail="code_snippet cannot be empty")
@@ -549,7 +567,11 @@ async def manual_review(payload: ManualReviewRequest, db: Session = Depends(get_
     return new_review
 
 
-@app.post("/api/execute", response_model=ExecuteOut, dependencies=[Depends(require_api_key)])
+@app.post(
+    "/api/execute",
+    response_model=ExecuteOut,
+    dependencies=[Depends(execute_rate_limit), Depends(require_api_key)],
+)
 async def execute_code(payload: ExecuteRequest):
     """
     Run a Python snippet in the Judge0 sandbox and return its captured output.
