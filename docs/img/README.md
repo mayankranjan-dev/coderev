@@ -15,10 +15,4 @@ Before capturing: use a clean database (or only reviews you are happy to show), 
 
 ## Embedding in the README
 
-Once a file exists, add it with a line like:
-
-```markdown
-![Landing page](docs/img/landing.png)
-```
-
-Until then, the README keeps a marked "screenshot to add" line for that image.
+Once a file exists, add it to the README as a Markdown image whose path is `docs/img/<filename>`, and delete the matching "screenshot to add" line. Until then, the README keeps a marked "screenshot to add" line for that image.

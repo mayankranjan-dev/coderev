@@ -125,7 +125,7 @@ Frontend dependency audit: `npm audit` reports 0 vulnerabilities after the vite 
 
 ## Limitations
 
-- **Small model:** the default is a 1.5B-parameter local model (`qwen2.5-coder:1.5b`). Expect missed bugs and invented ones.
+- **Small model:** the default is a 1.5B-parameter local model (`qwen2.5-coder:1.5b`). Missed bugs and invented findings are possible; how often is not yet measured.
 - **Small sample:** the planned dataset is small, so intervals will be wide (see EVAL_DESIGN section 6.3).
 - **Label subjectivity:** one author picks the lines and categories.
 - **Contamination risk:** the model may have seen the fix commits in training. Cases before a cutoff date are reported separately.

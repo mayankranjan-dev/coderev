@@ -56,4 +56,7 @@ Third task: CI verification, security, Docker, documentation. A row's own commit
 | D2 README rewrite (RESULTS_STATE: NOT_YET) | done | 0e1a842 |
 | D3 architecture notes | done | 47b6d47 |
 | D4 decision prompts for author | done | aa7c4a2 |
-| D5 results refresh steps | done | pending |
+| D5 results refresh steps | done | e1381de |
+| V1 verification (reported in chat) | done; no file changes beyond a link fix in docs/img/README.md and a README wording fix | pending |
+| V2 PR description | done | pending |
+| V3 audit update | not started | |
