@@ -33,6 +33,9 @@ const STATUS_LABELS = {
   llm_timeout: "Review pending — the local model timed out. It will be retried automatically.",
   llm_error: "Review pending — the local model returned an error. It will be retried automatically.",
   llm_failed: "No review — every retry attempt failed.",
+  llm_malformed_output:
+    "No review — the model's output could not be parsed into findings. Raw output:",
+  llm_empty_output: "No review — the model returned an empty response.",
   reviewed: null,
 };
 
@@ -78,33 +81,22 @@ function reviewLabel(review) {
 }
 
 /**
- * Split review_text into severity-tagged findings.
- *
- * Mirrors the backend's line-prefix parser: a line counts as a finding when
- * it starts with CRITICAL / WARNING / NITPICK followed by a colon or space.
- * Lines that match nothing are kept as untagged prose so no model output is
- * silently dropped.
+ * Structured findings come from the backend (reviewer/findings.py), which
+ * also re-parses review_text for rows stored before findings existed, so the
+ * frontend no longer parses model text itself.
  */
-function parseFindings(reviewText) {
-  if (!reviewText) return [];
+function structuredFindings(review) {
+  return Array.isArray(review.findings) ? review.findings : [];
+}
 
-  return reviewText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const match = line.match(/^(CRITICAL|WARNING|NITPICK)[:\s]\s*(.*)$/i);
-
-      if (match) {
-        return {
-          key: index,
-          severity: match[1].toUpperCase(),
-          text: match[2] || line,
-        };
-      }
-
-      return { key: index, severity: null, text: line };
-    });
+/** "pkg/mod.py:40-42", "pkg/mod.py:7", "pkg/mod.py", or null. */
+function formatLocation(finding) {
+  if (!finding.file) return null;
+  if (finding.line_start == null) return finding.file;
+  const end = finding.line_end ?? finding.line_start;
+  return end === finding.line_start
+    ? `${finding.file}:${finding.line_start}`
+    : `${finding.file}:${finding.line_start}-${end}`;
 }
 
 function Spinner() {
@@ -211,42 +203,72 @@ function DiffView({ diffText }) {
 }
 
 function ReviewView({ review }) {
-  const findings = useMemo(() => parseFindings(review.review_text), [review.review_text]);
+  const findings = useMemo(() => structuredFindings(review), [review]);
   const statusNote = STATUS_LABELS[review.status];
+  const truncatedNote = review.truncated ? (
+    <p className="border-b border-slate-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+      The diff was larger than the model's context window, so only part of it was reviewed.
+    </p>
+  ) : null;
 
   if (statusNote) {
-    return <p className="p-4 text-sm text-slate-500">{statusNote}</p>;
+    return (
+      <>
+        {truncatedNote}
+        <p className="p-4 text-sm text-slate-500">{statusNote}</p>
+        {review.review_text ? (
+          // Unparseable model output is shown as-is so nothing is hidden.
+          <pre className="whitespace-pre-wrap break-words px-4 pb-4 font-mono text-xs leading-5 text-slate-600">
+            {review.review_text}
+          </pre>
+        ) : null}
+      </>
+    );
   }
 
   if (findings.length === 0) {
     return (
-      <p className="p-4 text-sm text-slate-500">
-        The review completed without any findings.
-      </p>
+      <>
+        {truncatedNote}
+        <p className="p-4 text-sm text-slate-500">
+          The review completed without any findings.
+        </p>
+      </>
     );
   }
 
   return (
-    <ul className="divide-y divide-slate-200">
-      {findings.map((finding) => (
-        <li key={finding.key} className="flex gap-3 px-4 py-3">
-          {finding.severity ? (
-            <span
-              className={`mt-0.5 w-16 shrink-0 self-start rounded py-0.5 text-center text-[11px] font-medium ${
-                SEVERITY_STYLES[finding.severity]
-              }`}
-            >
-              {finding.severity}
-            </span>
-          ) : (
-            <span className="mt-0.5 w-16 shrink-0 self-start py-0.5 text-center text-[11px] text-slate-400">
-              —
-            </span>
-          )}
-          <p className="text-sm leading-6 text-slate-900">{finding.text}</p>
-        </li>
-      ))}
-    </ul>
+    <>
+      {truncatedNote}
+      <ul className="divide-y divide-slate-200">
+        {findings.map((finding, index) => {
+          const location = formatLocation(finding);
+          return (
+            <li key={index} className="flex gap-3 px-4 py-3">
+              <span
+                className={`mt-0.5 w-16 shrink-0 self-start rounded py-0.5 text-center text-[11px] font-medium ${
+                  SEVERITY_STYLES[finding.severity] ?? "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {finding.severity}
+              </span>
+              <div className="min-w-0 text-sm leading-6 text-slate-900">
+                {location ? (
+                  <p className="font-mono text-xs text-slate-500">{location}</p>
+                ) : null}
+                <p>{finding.message}</p>
+                {finding.correction ? (
+                  <p className="text-slate-600">
+                    <span className="font-medium text-slate-700">Correction:</span>{" "}
+                    {finding.correction}
+                  </p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
